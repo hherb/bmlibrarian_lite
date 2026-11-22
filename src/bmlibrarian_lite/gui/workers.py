@@ -1216,6 +1216,8 @@ class IncrementalSearchWorker(SingleOutcome, QThread):
                         mesh_terms=article.mesh_terms,
                         source=DocumentSource.PUBMED,
                         publication_types=article.publication_types,
+                        medline_status=article.medline_status,
+                        indexing_method=article.indexing_method,
                     )
                     batch_docs.append(doc)
 

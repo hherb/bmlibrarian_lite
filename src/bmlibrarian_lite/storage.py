@@ -215,13 +215,15 @@ UPSERT_DOCUMENT_SQL = (
     """
     INSERT INTO documents
     (id, title, abstract, authors, year, journal, doi, pmid,
-     pmc_id, url, mesh_terms, source, publication_types)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     pmc_id, url, mesh_terms, source, publication_types,
+     medline_status, indexing_method)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
     """
     + ", ".join(
         [f"{c} = {_KEEP_TEXT.format(c=c)}" for c in (
-            "title", "abstract", "journal", "doi", "pmid", "pmc_id", "url", "source")]
+            "title", "abstract", "journal", "doi", "pmid", "pmc_id", "url", "source",
+            "medline_status", "indexing_method")]
         + [f"{c} = {_KEEP_LIST.format(c=c)}" for c in ("authors", "mesh_terms")]
         + ["year = COALESCE(excluded.year, documents.year)",
            "publication_types = COALESCE(excluded.publication_types, documents.publication_types)"]
@@ -300,6 +302,7 @@ class LiteStorage:
             self._migrate_scored_documents_constraint()
             self._migrate_transparency_results()
             self._migrate_document_publication_types()
+            self._migrate_document_indexing()
             self._sweep_orphaned_document_vectors()
             with self._sqlite_connection() as conn:
                 self._sweep_orphan_chunk_vectors(conn)
@@ -753,6 +756,26 @@ class LiteStorage:
                 f"Could not add documents.publication_types: {e}"
             ) from e
 
+    def _migrate_document_indexing(self) -> None:
+        """Give older databases the columns PubMed's indexing status lives in.
+
+        Raises:
+            SQLiteError: If a column cannot be added.
+        """
+        try:
+            with self._sqlite_connection() as conn:
+                columns = {
+                    row["name"]
+                    for row in conn.execute("PRAGMA table_info(documents)")
+                }
+                for column in ("medline_status", "indexing_method"):
+                    if column not in columns:
+                        conn.execute(f"ALTER TABLE documents ADD COLUMN {column} TEXT")
+                        logger.info("Added %s to documents.", column)
+                conn.commit()
+        except sqlite3.Error as e:
+            raise SQLiteError(f"Could not add documents indexing columns: {e}") from e
+
     def _sweep_orphaned_document_vectors(self) -> None:
         """Delete vectors whose document row is gone (idempotent).
 
@@ -982,7 +1005,9 @@ class LiteStorage:
             mesh_terms TEXT,  -- JSON array
             source TEXT NOT NULL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            publication_types TEXT  -- JSON array; NULL = not recorded
+            publication_types TEXT,  -- JSON array; NULL = not recorded
+            medline_status TEXT,
+            indexing_method TEXT
         );
 
         -- Search sessions
@@ -1314,6 +1339,8 @@ class LiteStorage:
                         json.dumps(document.mesh_terms),
                         document.source.value,
                         _types_to_json(document.publication_types),
+                        document.medline_status,
+                        document.indexing_method,
                     ),
                 )
 
@@ -1422,6 +1449,8 @@ class LiteStorage:
                             json.dumps(doc.mesh_terms),
                             doc.source.value,
                             _types_to_json(doc.publication_types),
+                            doc.medline_status,
+                            doc.indexing_method,
                         ),
                     )
                     ids.append(doc.id)
@@ -1474,7 +1503,7 @@ class LiteStorage:
                     """
                     SELECT id, title, abstract, authors, year, journal,
                            doi, pmid, pmc_id, url, mesh_terms, source,
-                           publication_types
+                           publication_types, medline_status, indexing_method
                     FROM documents
                     WHERE id = ?
                     """,
@@ -1499,6 +1528,8 @@ class LiteStorage:
                     mesh_terms=json.loads(row["mesh_terms"] or "[]"),
                     source=DocumentSource(row["source"]),
                     publication_types=_types_from_json(row["publication_types"]),
+                    medline_status=row["medline_status"],
+                    indexing_method=row["indexing_method"],
                 )
         except sqlite3.Error as e:
             logger.error(f"Failed to get document {document_id}: {e}")
@@ -1539,7 +1570,7 @@ class LiteStorage:
                     f"""
                     SELECT id, title, abstract, authors, year, journal,
                            doi, pmid, pmc_id, url, mesh_terms, source,
-                           publication_types
+                           publication_types, medline_status, indexing_method
                     FROM documents
                     WHERE id IN ({placeholders})
                     """,
@@ -1562,6 +1593,8 @@ class LiteStorage:
                         mesh_terms=json.loads(row["mesh_terms"] or "[]"),
                         source=DocumentSource(row["source"]),
                         publication_types=_types_from_json(row["publication_types"]),
+                        medline_status=row["medline_status"],
+                        indexing_method=row["indexing_method"],
                     ))
 
                 return documents
@@ -1631,6 +1664,7 @@ class LiteStorage:
                         d.id, d.title, d.abstract, d.authors, d.year,
                         d.journal, d.doi, d.pmid, d.pmc_id, d.url,
                         d.mesh_terms, d.source, d.publication_types,
+                        d.medline_status, d.indexing_method,
                         v.distance
                     FROM vec_documents v
                     JOIN documents d ON d.rowid = v.rowid
@@ -1656,6 +1690,8 @@ class LiteStorage:
                         mesh_terms=json.loads(row["mesh_terms"] or "[]"),
                         source=DocumentSource(row["source"]),
                         publication_types=_types_from_json(row["publication_types"]),
+                        medline_status=row["medline_status"],
+                        indexing_method=row["indexing_method"],
                     ))
 
                 return documents

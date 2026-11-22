@@ -1686,6 +1686,9 @@ class LiteDocument:
             ``None`` means not recorded; ``[]`` means the record had none.
             Deliberately not in ``metadata``, which Tier 1 quality
             classification reads.
+        medline_status: PubMed's ``MedlineCitation`` ``Status``; ``None`` when
+            not recorded (Europe PMC records never carry it).
+        indexing_method: PubMed's ``IndexingMethod`` (e.g. ``Automated``).
     """
 
     id: str  # Unique identifier (e.g., "pmid-12345" or UUID)
@@ -1703,6 +1706,8 @@ class LiteDocument:
     is_preprint: bool = False
     metadata: dict[str, Any] = field(default_factory=dict)
     publication_types: list[str] | None = None
+    medline_status: str | None = None
+    indexing_method: str | None = None
 
     @property
     def formatted_authors(self) -> str:
@@ -1757,6 +1762,8 @@ class LiteDocument:
             "is_preprint": self.is_preprint,
             "metadata": self.metadata,
             "publication_types": self.publication_types,
+            "medline_status": self.medline_status,
+            "indexing_method": self.indexing_method,
         }
 
     @classmethod
@@ -1786,6 +1793,8 @@ class LiteDocument:
             is_preprint=data.get("is_preprint", False),
             metadata=data.get("metadata", {}),
             publication_types=data.get("publication_types"),
+            medline_status=data.get("medline_status"),
+            indexing_method=data.get("indexing_method"),
         )
 
 

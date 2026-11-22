@@ -333,6 +333,9 @@ class ArticleMetadata:
         relevance_rank: Position in search results (if applicable)
         publication_types: PubMed's publication-type labels; ``None`` when
             the record carries no list
+        medline_status: ``MedlineCitation`` ``Status`` attribute, as given
+        indexing_method: ``MedlineCitation`` ``IndexingMethod`` attribute
+            (e.g. ``Automated``), as given
     """
 
     pmid: str
@@ -348,6 +351,8 @@ class ArticleMetadata:
     pmc_id: Optional[str] = None
     relevance_rank: Optional[int] = None
     publication_types: list[str] | None = None
+    medline_status: str | None = None
+    indexing_method: str | None = None
 
     def __post_init__(self) -> None:
         """Set URL if not provided."""

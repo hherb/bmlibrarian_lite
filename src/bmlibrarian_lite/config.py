@@ -37,6 +37,7 @@ import tempfile
 
 from .constants import (
     BROWSER_PROFILE_DIRNAME,
+    MANTA_DEFAULT_URL,
     ENV_CORE_API_KEY,
     ENV_ELSEVIER_API_KEY,
     ENV_ELSEVIER_INSTTOKEN,
@@ -465,6 +466,23 @@ class DiscoveryConfig:
 
 
 @dataclass
+class MantaConfig:
+    """The local MANTA server the shadow benchmark posts to ("" = off)."""
+
+    url: str = MANTA_DEFAULT_URL
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialise for the config file."""
+        return {"url": self.url}
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "MantaConfig":
+        """Read from the config file; a missing or non-text url is off."""
+        url = data.get("url", MANTA_DEFAULT_URL)
+        return cls(url=url.strip() if isinstance(url, str) else MANTA_DEFAULT_URL)
+
+
+@dataclass
 class EuropePMCConfig:
     """
     Europe PMC API configuration.
@@ -769,6 +787,7 @@ class LiteConfig:
     pubmed: PubMedConfig = field(default_factory=PubMedConfig)
     europepmc: EuropePMCConfig = field(default_factory=EuropePMCConfig)
     discovery: DiscoveryConfig = field(default_factory=DiscoveryConfig)
+    manta: MantaConfig = field(default_factory=MantaConfig)
     openathens: OpenAthensConfig = field(default_factory=OpenAthensConfig)
     storage: StorageConfig = field(default_factory=StorageConfig)
     search: SearchConfig = field(default_factory=SearchConfig)
@@ -896,6 +915,9 @@ class LiteConfig:
                 citations_from_full_text=from_full_text,
                 full_text_min_score=min_score,
             )
+
+        if isinstance(data.get("manta"), dict):
+            config.manta = MantaConfig.from_dict(data["manta"])
 
         if "europepmc" in data:
             europepmc_data = data["europepmc"]
@@ -1039,6 +1061,7 @@ class LiteConfig:
                 "citations_from_full_text": self.discovery.citations_from_full_text,
                 "full_text_min_score": self.discovery.full_text_min_score,
             },
+            "manta": self.manta.to_dict(),
             "openathens": {
                 "enabled": self.openathens.enabled,
                 "institution_url": self.openathens.institution_url,

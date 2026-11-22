@@ -453,6 +453,8 @@ class LiteSearchAgent(LiteBaseAgent):
                 url=article.url,
                 mesh_terms=article.mesh_terms,
                 publication_types=article.publication_types,
+                medline_status=article.medline_status,
+                indexing_method=article.indexing_method,
             )
             documents.append(doc)
 

@@ -632,6 +632,8 @@ class SearchService:
             is_preprint=False,
             has_fulltext_xml=False,
             publication_types=article.publication_types,
+            medline_status=article.medline_status,
+            indexing_method=article.indexing_method,
         )
 
     def _europepmc_to_merged(self, article: ArticleInfo) -> MergedArticle:

@@ -1612,3 +1612,9 @@ RETRACTION_WATCH_MIN_KEEP_RATIO = 0.95
 # retraction reaches Crossref and the export within days, and a review run is
 # often repeated within one. A verdict with a lookup unanswered is never reused.
 RETRACTION_CHECK_MAX_AGE_DAYS = 7
+
+
+# MANTA shadow screener (a local server; empty URL = off)
+MANTA_DEFAULT_URL = ""
+MANTA_REQUEST_TIMEOUT_SECONDS = 60
+MANTA_APP_NAME = "desktop"
