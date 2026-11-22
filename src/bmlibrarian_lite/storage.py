@@ -49,6 +49,7 @@ import sqlite_vec
 
 from . import (
     citation_reads_store,
+    manta_store,
     rescue_queue_store,
     retraction_store,
     smart_search_store,
@@ -281,6 +282,8 @@ class LiteStorage:
                 conn.executescript(uploaded_full_texts_store.SCHEMA)
                 # The alternative queries smart search has run per question
                 conn.executescript(smart_search_store.SCHEMA)
+                # What the MANTA shadow stage found per paper
+                conn.executescript(manta_store.SCHEMA)
                 # Create sqlite-vec virtual tables for document and chunk embeddings
                 conn.execute(
                     f"""
@@ -3555,6 +3558,25 @@ class LiteStorage:
         with self._sqlite_connection() as conn:
             citation_reads_store.record(conn, checkpoint_id, reads, read_at)
             conn.commit()
+
+    def record_manta_judgement(self, row: manta_store.MantaRow) -> None:
+        """Store one MANTA shadow attempt (replacing the row of the same key).
+
+        Args:
+            row: The attempt.
+        """
+        with self._sqlite_connection() as conn:
+            manta_store.record(conn, row)
+            conn.commit()
+
+    def manta_judgements(self, document_id: str) -> list[manta_store.MantaRow]:
+        """Every MANTA shadow attempt for a paper, oldest first.
+
+        Args:
+            document_id: The paper.
+        """
+        with self._sqlite_connection() as conn:
+            return manta_store.read(conn, document_id)
 
     def get_citation_reads(self, checkpoint_id: str) -> dict[str, bool]:
         """Which text each paper's citations in a run were read from.

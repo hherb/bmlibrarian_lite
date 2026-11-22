@@ -35,6 +35,7 @@ from typing import Optional, Callable
 from bmlib.llm.utils import strict_json_loads
 
 from ..constants import SCORE_MAX, SCORE_MIN
+from ..manta_shadow import shadow_for
 from ..data_models import (
     LiteDocument,
     ScoredDocument,
@@ -284,11 +285,13 @@ Evaluate the relevance of this document to the research question."""
 
         try:
             result = self._score_with_retry(messages)
-            return ScoredDocument(
+            scored = ScoredDocument(
                 document=document,
                 score=result["score"],
                 explanation=result["explanation"],
             )
+            self._shadow(question, document, result["score"])
+            return scored
         except RetryExhaustedError as e:
             # The retries were spent on something -- an unreachable provider,
             # a refused key -- and only that says what the user can do about
@@ -314,6 +317,15 @@ Evaluate the relevance of this document to the research question."""
                 score=error_code.value,
                 explanation=f"Scoring failed: {error_code.description}",
             )
+
+    def _shadow(self, question: str, document: LiteDocument, score: int) -> None:
+        """Hand a scored paper to the MANTA shadow stage; never raises."""
+        try:
+            shadow = shadow_for(self.config)
+            if shadow is not None:
+                shadow.observe(question, document, score, self._get_model())
+        except Exception:  # noqa: BLE001 - scoring must never fail because of MANTA
+            logger.warning("MANTA shadow hook failed", exc_info=True)
 
     @llm_retry(max_retries=3, retry_on_json_error=True)
     def _score_with_retry(self, messages: list) -> dict:

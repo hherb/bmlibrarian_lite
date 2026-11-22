@@ -74,6 +74,9 @@ retraction_store.py   # retraction_checks table, PaperCheck
 retraction_checks.py  # RetractionChecker: reuse/replace stored verdicts; an outage never erases one
 retraction_screen.py  # Pure: RetractionScreen (kept/excluded), screen_with_fallback, RetractionSnapshot
 retraction_text.py    # Reader-facing retraction sentences (notice, causes, status lines)
+manta_client.py       # MantaClient: the local MANTA-4B server's judge and reference calls; MantaUnreachable, MantaRefused
+manta_store.py        # manta_judgements table, MantaRow: one row per shadow attempt (judged / unreachable / failed)
+manta_shadow.py       # MantaShadow: background worker judging every LLM-scored paper beside the LLM; shadow_for (off without a URL)
 keyed_service_session.py # KeyedServiceSession: a keyed service's 429 pause, refused key, refused network (process-wide)
 bot_walls.py          # Bot-wall challenge pages recognised from an answer (#480): WALL_MARKERS, challenge_markers
 pdf_download.py       # PDF download helpers: body prefix, .part, .unchecked and .held files, MAX_PDF_SIZE
@@ -90,6 +93,7 @@ chunking.py           # Text chunking; analysis_windows (every LLM text path: no
 pdf_utils.py          # PDF text extraction (bmlib PyMuPDFConverter: fault side, MuPDF messages, cancel)
 constants.py          # Application constants
 exceptions.py         # Custom exception hierarchy
+tools/manta_server/   # Stand-alone MANTA-4B server: localhost HTTP, ledger, report (never imports the app)
 ```
 
 ## Mobile Apps
