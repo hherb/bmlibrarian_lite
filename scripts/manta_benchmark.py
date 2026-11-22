@@ -108,6 +108,33 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tools" / "manta_server"))
+from manta_protocol import (  # noqa: E402, F401
+    _HUMAN_INDEXING,
+    _MH_CASE_CONTROL,
+    _MH_COHORT,
+    _MH_CROSS_SECTIONAL,
+    _MH_PROSPECTIVE,
+    _MH_RETROSPECTIVE,
+    _PT_CASE_REPORT,
+    _PT_GUIDELINES,
+    _PT_META,
+    _PT_NOT_PRIMARY,
+    _PT_RCT,
+    _PT_SR,
+    _PT_TRIALS,
+    DESIGN_GROUPS,
+    DESIGN_INSTRUCTIONS,
+    DESIGN_OPTIONS,
+    RELEVANCE_INSTRUCTIONS,
+    RELEVANCE_LEVELS,
+    SCORE_MIN,
+    design_label,
+    design_request,
+    expected_score,
+    relevance_request,
+)
+
 # --- Sources -----------------------------------------------------------------
 
 BEIR_CORPUS_REPO = "BeIR/trec-covid"
@@ -144,39 +171,6 @@ _RETRYABLE_STATUSES = frozenset({429, 500, 502, 503, 504})
 
 RELEVANCE_GRADES = (0, 1, 2)
 
-# The app's five relevance levels (agents/scoring_agent.py), lowest first.
-RELEVANCE_LEVELS = (
-    "Not relevant to the research question",
-    "Marginally relevant, tangentially related",
-    "Moderately relevant, contains useful related information",
-    "Highly relevant, provides substantial supporting information",
-    "Directly answers the question with strong evidence",
-)
-RELEVANCE_INSTRUCTIONS = "How relevant is this article to answering the research question?"
-SCORE_MIN = 1
-
-# The LiteStudyClassifier's options (quality/study_classifier.py), with
-# descriptions for MANTA's choice question.
-DESIGN_OPTIONS: dict[str, str] = {
-    "systematic_review": "Systematic review without a meta-analysis",
-    "meta_analysis": "Meta-analysis (with or without a systematic review)",
-    "rct": "Randomised controlled trial",
-    "cohort_prospective": "Prospective cohort study",
-    "cohort_retrospective": "Retrospective cohort study",
-    "case_control": "Case-control study",
-    "cross_sectional": "Cross-sectional study",
-    "case_series": "Case series",
-    "case_report": "Case report",
-    "editorial": "Editorial",
-    "letter": "Letter",
-    "guideline": "Clinical practice guideline",
-    "other": "Another design (narrative review, laboratory, animal or qualitative study, ...)",
-}
-DESIGN_INSTRUCTIONS = (
-    "What is the study design of this paper? Classify what this paper itself reports, "
-    "not the studies it cites."
-)
-
 # The classes the corpus is drawn for, each with its PubMed pre-filter.
 DESIGN_QUERIES: dict[str, str] = {
     "meta_analysis": '"Meta-Analysis"[pt]',
@@ -188,51 +182,6 @@ DESIGN_QUERIES: dict[str, str] = {
     "cross_sectional": '"Cross-Sectional Studies"[mh:noexp] NOT "Cohort Studies"[mh:noexp]',
     "case_report": '"Case Reports"[pt] NOT "Review"[pt]',
     "guideline": '("Practice Guideline"[pt] OR "Guideline"[pt])',
-}
-
-_PT_META = "Meta-Analysis"
-_PT_SR = "Systematic Review"
-_PT_RCT = "Randomized Controlled Trial"
-_PT_CASE_REPORT = "Case Reports"
-_PT_GUIDELINES = frozenset({"Practice Guideline", "Guideline"})
-_PT_TRIALS = frozenset(
-    {
-        "Randomized Controlled Trial",
-        "Clinical Trial",
-        "Controlled Clinical Trial",
-        "Pragmatic Clinical Trial",
-        "Equivalence Trial",
-        "Clinical Trial, Phase I",
-        "Clinical Trial, Phase II",
-        "Clinical Trial, Phase III",
-        "Clinical Trial, Phase IV",
-    }
-)
-_PT_NOT_PRIMARY = frozenset({"Review", "Systematic Review", "Meta-Analysis", "Comment",
-                             "Editorial", "Letter", "Practice Guideline", "Guideline"})
-_MH_PROSPECTIVE = "Prospective Studies"
-_MH_RETROSPECTIVE = "Retrospective Studies"
-_MH_COHORT = "Cohort Studies"
-_MH_CASE_CONTROL = "Case-Control Studies"
-_MH_CROSS_SECTIONAL = "Cross-Sectional Studies"
-_HUMAN_INDEXING = frozenset({None, "Manual"})
-
-# Coarse groups: designs a reader would not tell apart from an abstract
-# without the indexer's convention (SR vs MA, which kind of cohort).
-DESIGN_GROUPS: dict[str, str] = {
-    "systematic_review": "evidence_synthesis",
-    "meta_analysis": "evidence_synthesis",
-    "rct": "rct",
-    "cohort_prospective": "cohort",
-    "cohort_retrospective": "cohort",
-    "case_control": "case_control",
-    "cross_sectional": "cross_sectional",
-    "case_series": "case",
-    "case_report": "case",
-    "editorial": "opinion",
-    "letter": "opinion",
-    "guideline": "guideline",
-    "other": "other",
 }
 
 # --- Analysis ----------------------------------------------------------------
@@ -251,58 +200,6 @@ LLM_WORKERS = 4
 # =============================================================================
 # Pure helpers
 # =============================================================================
-
-
-def design_label(
-    publication_types: Iterable[str],
-    mesh_headings: Iterable[str],
-) -> str | None:
-    """The study design that a record's human indexing states, if one.
-
-    The rules are written against NLM's indexing conventions, not against
-    any classifier: a publication type for syntheses, trials, case reports
-    and guidelines, and the MeSH design headings for observational studies.
-    A record whose headings name two designs is refused.
-
-    Args:
-        publication_types: The record's publication type names.
-        mesh_headings: The record's MeSH descriptor names (not qualifiers).
-
-    Returns:
-        A ``DESIGN_OPTIONS`` key, or None when the indexing states no single
-        design.
-    """
-    pt = set(publication_types)
-    mh = set(mesh_headings)
-    if _PT_META in pt:
-        return "meta_analysis"
-    if _PT_SR in pt:
-        return "systematic_review"
-    if pt & _PT_GUIDELINES:
-        return None if (pt & _PT_TRIALS) else "guideline"
-    if _PT_RCT in pt:
-        return None if "Review" in pt else "rct"
-    if pt & _PT_NOT_PRIMARY or pt & _PT_TRIALS:
-        return None
-    if _PT_CASE_REPORT in pt:
-        observational = {_MH_COHORT, _MH_CASE_CONTROL, _MH_CROSS_SECTIONAL}
-        return None if mh & observational else "case_report"
-    cohort = _MH_COHORT in mh
-    case_control = _MH_CASE_CONTROL in mh
-    cross_sectional = _MH_CROSS_SECTIONAL in mh
-    if cohort + case_control + cross_sectional != 1:
-        return None
-    prospective = _MH_PROSPECTIVE in mh
-    retrospective = _MH_RETROSPECTIVE in mh
-    if cohort:
-        if prospective and not retrospective:
-            return "cohort_prospective"
-        if retrospective and not prospective:
-            return "cohort_retrospective"
-        return None
-    if case_control:
-        return None if prospective else "case_control"
-    return None if prospective else "cross_sectional"
 
 
 @dataclass(frozen=True)
@@ -375,70 +272,6 @@ def parse_pubmed_xml(xml_bytes: bytes) -> list[PubMedRecord]:
             )
         )
     return records
-
-
-def relevance_request(item_id: str, question: str, title: str, abstract: str) -> dict[str, Any]:
-    """The MANTA request for one question-abstract pair.
-
-    Args:
-        item_id: The item's id (it also seeds MANTA's option order).
-        question: The research question.
-        title: The article's title.
-        abstract: The article's abstract.
-
-    Returns:
-        A request in MANTA's format, one ``score`` question.
-    """
-    return {
-        "id": item_id,
-        "state": {"research_question": question, "article": {"title": title, "abstract": abstract}},
-        "questions": {
-            "relevance": {
-                "type": "score",
-                "instructions": RELEVANCE_INSTRUCTIONS,
-                "criteria": list(RELEVANCE_LEVELS),
-            }
-        },
-    }
-
-
-def design_request(item_id: str, title: str, abstract: str) -> dict[str, Any]:
-    """The MANTA request for one abstract's study design.
-
-    Args:
-        item_id: The item's id (it also seeds MANTA's option order).
-        title: The article's title.
-        abstract: The article's abstract.
-
-    Returns:
-        A request in MANTA's format, one ``choice`` question.
-    """
-    return {
-        "id": item_id,
-        "state": {"article": {"title": title, "abstract": abstract}},
-        "questions": {
-            "study_design": {
-                "type": "choice",
-                "instructions": DESIGN_INSTRUCTIONS,
-                "criteria": dict(DESIGN_OPTIONS),
-            }
-        },
-    }
-
-
-def expected_score(level_probabilities: Mapping[str, float]) -> float:
-    """MANTA's relevance as the expected level on the app's 1-5 scale.
-
-    Args:
-        level_probabilities: Option id ("0", "1", ...) to probability.
-
-    Returns:
-        The expected score, ``SCORE_MIN`` for the lowest level.
-    """
-    total = 0.0
-    for option, p in sorted(level_probabilities.items(), key=lambda kv: int(kv[0])):
-        total += (int(option) + SCORE_MIN) * p
-    return total
 
 
 def average_ranks(values: Sequence[float]) -> list[float]:
