@@ -542,6 +542,15 @@ final class Document {
     /// When the judgement (or the failed attempt) was made.
     var mantaJudgedAt: Date?
 
+    /// Whether the LLM's score reached the server; `false` when no judgement was made.
+    var mantaReferencePosted: Bool?
+
+    /// Whether MANTA judged a truncated text.
+    var mantaTruncated: Bool?
+
+    /// Seconds MANTA took to judge.
+    var mantaSeconds: Double?
+
     /// Store a MANTA shadow result; a result without a judgement clears any earlier scores.
     ///
     /// - Parameters:
@@ -550,6 +559,7 @@ final class Document {
     func applyManta(_ result: MantaShadowResult, serverURL: String) {
         mantaServerURL = serverURL
         mantaJudgedAt = result.judgedAt
+        mantaReferencePosted = result.referencePosted
         let judgement: MantaJudgement?
         switch result.outcome {
         case .judged(let judged):
@@ -574,6 +584,8 @@ final class Document {
         mantaDesign = judgement?.design
         mantaDesignProbability = judgement?.designProbability
         mantaDesignJSON = judgement?.designProbabilities.flatMap { Self.jsonObject($0) }
+        mantaTruncated = judgement?.truncated
+        mantaSeconds = judgement?.seconds
     }
 
     private static func jsonObject(_ probabilities: [String: Double]) -> String? {

@@ -35,11 +35,14 @@ private actor StubJudge: MantaJudging {
     private(set) var calls: [String] = []
     private(set) var references: [MantaReference] = []
     var judgeError: Error?
+    private var referenceFails = false
     private var holding = false
     private var held: CheckedContinuation<Void, Never>?
     private var arrived: CheckedContinuation<Void, Never>?
 
     func failJudge(with error: Error) { judgeError = error }
+
+    func failReference() { referenceFails = true }
 
     /// The next judge waits until ``release()``.
     func hold() { holding = true }
@@ -70,6 +73,7 @@ private actor StubJudge: MantaJudging {
     func reference(_ reference: MantaReference) async throws {
         calls.append("reference \(reference.judgementID)")
         references.append(reference)
+        if referenceFails { throw MantaServiceError.refused(status: 500, message: "ledger locked") }
     }
 }
 
@@ -148,6 +152,23 @@ final class MantaShadowTests: XCTestCase {
         XCTAssertFalse(results.all[0].referencePosted)
         guard case .unreachable(let message) = results.all[0].outcome else { return XCTFail("not unreachable") }
         XCTAssertEqual(message, "Could not connect")
+    }
+
+    @MainActor
+    func testFailedReferenceKeepsTheJudgement() async {
+        let stub = StubJudge()
+        await stub.failReference()
+        let results = Results()
+        let done = expectation(description: "one result")
+        results.expectation = done
+        let shadow = shadow(stub, results)
+
+        await shadow.observe(item("1"))
+        await fulfillment(of: [done], timeout: 5)
+
+        XCTAssertFalse(results.all[0].referencePosted)
+        guard case .judged(let j) = results.all[0].outcome else { return XCTFail("not judged") }
+        XCTAssertEqual(j.judgementID, "j-1")
     }
 
     @MainActor
@@ -230,6 +251,9 @@ final class MantaShadowTests: XCTestCase {
         XCTAssertEqual(document.mantaDesign, "rct")
         XCTAssertEqual(document.mantaDesignProbability, 0.9)
         XCTAssertEqual(document.mantaJudgedAt, at)
+        XCTAssertEqual(document.mantaReferencePosted, true)
+        XCTAssertEqual(document.mantaTruncated, false)
+        XCTAssertEqual(document.mantaSeconds, 0.1)
         XCTAssertNil(document.mantaError)
         let relevance = try JSONDecoder().decode(
             [String: Double].self, from: Data(try XCTUnwrap(document.mantaRelevanceJSON).utf8))
@@ -261,6 +285,9 @@ final class MantaShadowTests: XCTestCase {
         XCTAssertNil(document.mantaDesignProbability)
         XCTAssertNil(document.mantaDesignJSON)
         XCTAssertNotNil(document.mantaJudgedAt)
+        XCTAssertEqual(document.mantaReferencePosted, false)
+        XCTAssertNil(document.mantaTruncated)
+        XCTAssertNil(document.mantaSeconds)
     }
 
     func testAdapterKeepsMesh() {

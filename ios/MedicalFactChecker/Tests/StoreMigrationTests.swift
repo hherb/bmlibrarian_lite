@@ -252,6 +252,9 @@ final class StoreMigrationTests: XCTestCase {
         XCTAssertNil(document.mantaDesignJSON)
         XCTAssertNil(document.mantaError)
         XCTAssertNil(document.mantaJudgedAt)
+        XCTAssertNil(document.mantaReferencePosted)
+        XCTAssertNil(document.mantaTruncated)
+        XCTAssertNil(document.mantaSeconds)
         XCTAssertFalse(setAsideRan, "A store that migrates must never reach the last resort")
     }
 

@@ -15,6 +15,7 @@
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 import Foundation
+import OSLog
 import BioMedLit
 
 /// What ``MantaShadow`` needs of a MANTA server.
@@ -63,6 +64,7 @@ actor MantaShadow {
     /// What MANTA is asked for each paper.
     static let tasks = ["relevance", "design"]
 
+    private let logger = Logger(subsystem: "com.bmlibrarian.factchecker", category: "MantaShadow")
     private let service: MantaJudging
     private let onResult: @MainActor @Sendable (MantaShadowResult) -> Void
     private var pending: [MantaShadowItem] = []
@@ -119,7 +121,14 @@ actor MantaShadow {
         let reference = MantaReference(
             judgementID: judgement.judgementID, app: Self.app, llmModel: item.llmModel,
             llmScore: item.llmScore, llmDesign: nil, indexing: item.indexing)
-        let posted = (try? await service.reference(reference)) != nil
+        var posted = true
+        do {
+            try await service.reference(reference)
+        } catch {
+            posted = false
+            let why = String(describing: error)
+            logger.warning("MANTA reference not posted for \(item.pmid, privacy: .public): \(why, privacy: .public)")
+        }
         return MantaShadowResult(
             pmid: item.pmid, outcome: .judged(judgement), judgedAt: judgedAt, referencePosted: posted)
     }
