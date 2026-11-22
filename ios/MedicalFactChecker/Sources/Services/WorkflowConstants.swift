@@ -53,6 +53,10 @@ enum WorkflowConstants {
     /// `MANTA_ERROR_MAX_CHARS`: an error page must not fill the store.
     static let mantaErrorMaxLength = 500
 
+    /// The hosts a MANTA URL may name (lowercase, IPv6 without brackets): the
+    /// server is localhost only, so papers never go to another machine.
+    static let mantaLoopbackHosts: Set<String> = ["127.0.0.1", "localhost", "::1"]
+
     // MARK: - Automatic Full-Text Retrieval
 
     /// Default lowest relevance score (1-5) whose papers are fetched in full

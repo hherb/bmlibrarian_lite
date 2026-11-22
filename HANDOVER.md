@@ -152,11 +152,10 @@ git pin). Snapshot rows keep `run_status`/`run_deciding` as set-once facts.
 
 ## Recently landed (context)
 
-- **MANTA-4B shadow stage** (`tools/manta_server/`; start the server as its
-  `README.md` says). With `manta.url` (desktop) or *Settings → LLM → MANTA*
-  (macOS) set, every LLM-scored paper is judged by MANTA in the background and
-  the judgement, or why there was none, is stored per paper
-  (`manta_judgements`, `Document.manta*`); the run never waits for it.
+- **MANTA-4B shadow stage** (`tools/manta_server/`, started per its
+  `README.md`): with `manta.url` (desktop) or *Settings → LLM → MANTA* (macOS,
+  localhost URLs only) set, MANTA judges every LLM-scored paper in the
+  background, stored per paper (`manta_judgements`, `Document.manta*`).
 - **Strict service JSON** (#781, #784): every service's JSON but esearch is
   read strictly (desktop `search_failures.strict_response_json`, **a test
   double scripts `.content`, never `.json()`**; Android `strictJsonElement`).
@@ -215,7 +214,8 @@ git pin). Snapshot rows keep `run_status`/`run_deciding` as set-once facts.
   - **`Document.id` is an opaque UUID** (#208). **An identifier is only what
     a source stated it to be.** **Logging is not reporting** (#180/#181); a
     persisted tagged union needs named keys and a `schemaVersion` (#163).
-    **Measure JATS prevalence from the XML, never through the parser** (#164).
+    **Measure JATS prevalence from the XML, never through the parser** (#164);
+    **bmlib is ahead of Swift — port from it** (#165).
   - **CI on all three platforms** (#129). **No job may gain a `paths:`
     filter.** **The Qt preflight (`.github/scripts/qt_preflight.py`, QtWebEngine
     included) runs before pytest.** No test starts a settings-dialog thread.

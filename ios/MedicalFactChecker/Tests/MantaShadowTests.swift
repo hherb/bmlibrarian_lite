@@ -343,17 +343,20 @@ final class MantaShadowTests: XCTestCase {
         XCTAssertEqual(document.indexingMethod, "Automated")
     }
 
-    /// A workflow showing a session of two PubMed papers, scoring "Good paper" 4 and failing "Bad paper",
-    /// judging with `stub`. The container is returned to keep the store alive.
+    /// A workflow showing a session of two PubMed papers (111, 222) titled `titles`, scoring a title
+    /// containing "Good paper" 4 and failing any other, judging with `stub`. The container is returned to
+    /// keep the store alive.
     @MainActor
-    private func scoringWorkflow(_ stub: StubJudge) throws -> (FactCheckWorkflow, [Document], ModelContainer) {
+    private func scoringWorkflow(
+        _ stub: StubJudge, titles: [String] = ["Good paper", "Bad paper"]
+    ) throws -> (FactCheckWorkflow, [Document], ModelContainer) {
         let container = try ModelContainer(
             for: Schema(versionedSchema: SchemaV2.self),
             configurations: ModelConfiguration(isStoredInMemoryOnly: true))
         let context = ModelContext(container)
         let session = FactCheckSession(claim: "Does X help Y?")
         context.insert(session)
-        let documents = [("111", "Good paper"), ("222", "Bad paper")].map { pmid, title in
+        let documents = zip(["111", "222"], titles).map { pmid, title in
             let document = Document(pmid: pmid, title: title, abstract: "An abstract.")
             document.identifierKind = .pubmed
             document.doi = "10.1000/\(pmid)"
@@ -420,5 +423,37 @@ final class MantaShadowTests: XCTestCase {
         let calls = await stub.calls
         XCTAssertEqual(calls, ["judge 111"], "the cancelled shadow posts no reference")
         XCTAssertNil(documents[0].mantaOutcome)
+    }
+
+    /// A session deleted behind the workflow's back (History, Settings) takes no result, and its shadow stops.
+    @MainActor
+    func testDeletedSessionStoresNothingAndStopsTheShadow() async throws {
+        let stub = StubJudge()
+        await stub.hold()
+        let (workflow, documents, _) = try scoringWorkflow(stub, titles: ["Good paper", "Good paper too"])
+        let context = try XCTUnwrap(documents[0].modelContext)
+
+        try await workflow.scoreNewDocuments(documents.map(\.pmid))
+        await stub.waitUntilHeld()
+        context.delete(try XCTUnwrap(workflow.session))
+        try context.save()
+        await stub.release()
+        try await Task.sleep(for: .milliseconds(200))
+
+        let calls = await stub.calls
+        // the observe tasks may reach the shadow in either order: count, do not name
+        let references = calls.filter { $0.hasPrefix("reference") }
+        XCTAssertEqual(calls.first?.hasPrefix("judge"), true, "control: the first paper was judged")
+        XCTAssertEqual(references.count, 1, "the shadow stopped after the deleted session refused its first result")
+        XCTAssertFalse(context.hasChanges, "nothing was written into the deleted session")
+    }
+
+    func testOnlyLocalhostMantaURLsAreAccepted() {
+        for url in ["http://127.0.0.1:8765", "http://localhost:8765", "http://[::1]:8765", "HTTPS://LocalHost"] {
+            XCTAssertTrue(FactCheckWorkflow.isLoopbackMantaURL(url), url)
+        }
+        for url in ["https://example.org", "http://10.0.0.3:8765", "localhost:8765", "ftp://localhost", ""] {
+            XCTAssertFalse(FactCheckWorkflow.isLoopbackMantaURL(url), url)
+        }
     }
 }
