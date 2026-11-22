@@ -132,6 +132,13 @@ final class AppSettings {
         }
     }
 
+    // MARK: - MANTA Shadow Benchmark
+
+    /// Base URL of a local MANTA server for the shadow benchmark; empty means off.
+    var mantaURL: String {
+        didSet { UserDefaults.standard.set(mantaURL, forKey: Keys.mantaURL) }
+    }
+
     // MARK: - PubMed Configuration
 
     /// Email for NCBI API identification (recommended).
@@ -428,6 +435,7 @@ final class AppSettings {
         self.llmBaseURL = defaults.string(forKey: Keys.llmBaseURL) ?? defaultURL
         self.llmModel = defaults.string(forKey: Keys.llmModel) ?? defaultModel
         self.ncbiEmail = defaults.string(forKey: Keys.ncbiEmail) ?? ""
+        self.mantaURL = defaults.string(forKey: Keys.mantaURL) ?? ""
 
         self.batchSize = defaults.object(forKey: Keys.batchSize) as? Int ?? 20
         self.minRelevantDocuments = defaults.object(forKey: Keys.minRelevantDocuments) as? Int ?? 5
@@ -529,6 +537,7 @@ final class AppSettings {
         static let llmAPIKeyLegacy = "llm_api_key"
         static let apiKeyMigrated = "api_key_migrated_v1"
         static let ncbiEmail = "ncbi_email"
+        static let mantaURL = "manta_url"
         static let ncbiAPIKey = "ncbi_api_key"
         static let coreAPIKey = "core_api_key"
         static let elsevierAPIKey = "elsevier_api_key"
@@ -591,6 +600,7 @@ final class AppSettings {
         llmModel = LLMProvider.anthropic.defaultModel?.id ?? "claude-sonnet-4-5-20250929"
         clearAllAPIKeys()
         ncbiEmail = ""
+        mantaURL = ""
         // A failed removal keeps the stored key in use (the store logs why)
         saveNCBIAPIKey("")
         saveCOREAPIKey("")

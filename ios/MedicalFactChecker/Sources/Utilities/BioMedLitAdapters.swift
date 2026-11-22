@@ -151,6 +151,12 @@ struct UnifiedArticleMetadata: Sendable, Identifiable, Equatable {
     /// MeSH terms (Medical Subject Headings) for the article.
     let meshTerms: [String]
 
+    /// PubMed's MEDLINE citation status (`MEDLINE`, `PubMed-not-MEDLINE`, …); nil when not recorded.
+    let medlineStatus: String?
+
+    /// How PubMed indexed the record (`Manual`, `Automated`, `Curated`); nil when not recorded.
+    let indexingMethod: String?
+
     // MARK: - Source Tracking
 
     /// Which provider this article came from.
@@ -196,6 +202,8 @@ struct UnifiedArticleMetadata: Sendable, Identifiable, Equatable {
     ///   - publicationDate: Publication date string.
     ///   - year: Publication year.
     ///   - meshTerms: MeSH indexing terms.
+    ///   - medlineStatus: PubMed's MEDLINE citation status, or nil.
+    ///   - indexingMethod: PubMed's indexing method, or nil.
     ///   - source: Provider that returned this article.
     ///   - isPreprint: Whether this is a preprint.
     ///   - hasFullTextInPMC: Whether full text is available in PMC.
@@ -213,6 +221,8 @@ struct UnifiedArticleMetadata: Sendable, Identifiable, Equatable {
         publicationDate: String? = nil,
         year: Int? = nil,
         meshTerms: [String] = [],
+        medlineStatus: String? = nil,
+        indexingMethod: String? = nil,
         source: SearchProvider,
         isPreprint: Bool = false,
         identifierKind: ArticleIdentifierKind? = nil,
@@ -231,6 +241,8 @@ struct UnifiedArticleMetadata: Sendable, Identifiable, Equatable {
         self.publicationDate = publicationDate
         self.year = year
         self.meshTerms = meshTerms
+        self.medlineStatus = medlineStatus
+        self.indexingMethod = indexingMethod
         self.source = source
         self.isPreprint = isPreprint
         self.identifierKind = identifierKind
@@ -304,7 +316,9 @@ enum BioMedLitAdapters {
             journal: article.journal,
             publicationDate: article.publicationDate,
             year: Int(article.year),
-            meshTerms: [],  // BioMedLit doesn't parse MeSH terms yet
+            meshTerms: article.meshTerms ?? [],
+            medlineStatus: article.medlineStatus,
+            indexingMethod: article.indexingMethod,
             source: appProvider,
             // Europe PMC states the record's kind, and `SearchArticle` now
             // carries it. Until #209 this was hard-coded `false` because nothing

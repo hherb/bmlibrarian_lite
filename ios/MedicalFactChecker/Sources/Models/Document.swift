@@ -90,6 +90,16 @@ final class Document {
     @Attribute(.transformable(by: StringArrayTransformer.name.rawValue))
     var meshTerms: [String] = []
 
+    /// PubMed's MEDLINE citation status (`MEDLINE`, `PubMed-not-MEDLINE`, …).
+    ///
+    /// `nil` means not recorded (an older row, or a source that does not say).
+    /// Optional so no schema version is needed.
+    var medlineStatus: String?
+
+    /// How PubMed indexed the record (`Manual`, `Automated`, `Curated`); `nil`
+    /// when not recorded. Optional so no schema version is needed.
+    var indexingMethod: String?
+
     var publicationDate: String?
 
     // MARK: - Scoring
@@ -485,6 +495,91 @@ final class Document {
                 .flatMap { try? JSONEncoder().encode($0) }
                 .flatMap { String(data: $0, encoding: .utf8) }
         }
+    }
+
+    // MARK: - MANTA Shadow Judgement
+
+    // MANTA's judgement of this paper beside the LLM's score (the shadow
+    // benchmark). Every field optional, so no schema version is needed; `nil`
+    // throughout means never judged.
+
+    /// `"judged"`, `"unreachable"` or `"failed"`.
+    var mantaOutcome: String?
+
+    /// The server's id for the judgement, which the posted reference names.
+    var mantaJudgementID: String?
+
+    /// The MANTA server the judgement came from.
+    var mantaServerURL: String?
+
+    /// The MANTA model revision that judged.
+    var mantaRevision: String?
+
+    /// MANTA's expected relevance score on the app's 1-5 scale.
+    var mantaExpectedScore: Double?
+
+    /// MANTA's relevance level probabilities, as a JSON object.
+    var mantaRelevanceJSON: String?
+
+    /// MANTA's verdict at ``mantaCutoff``: `"in"` or `"out"`.
+    var mantaVerdict: String?
+
+    /// The expected-score cutoff the verdict was drawn at.
+    var mantaCutoff: Double?
+
+    /// MANTA's study design answer, when it was asked for one.
+    var mantaDesign: String?
+
+    /// The probability of ``mantaDesign``.
+    var mantaDesignProbability: Double?
+
+    /// MANTA's design probabilities, as a JSON object.
+    var mantaDesignJSON: String?
+
+    /// Why MANTA gave no judgement, capped at `WorkflowConstants.mantaErrorMaxLength`.
+    var mantaError: String?
+
+    /// When the judgement (or the failed attempt) was made.
+    var mantaJudgedAt: Date?
+
+    /// Store a MANTA shadow result; a result without a judgement clears any earlier scores.
+    ///
+    /// - Parameters:
+    ///   - result: What ``MantaShadow`` delivered for this paper.
+    ///   - serverURL: The MANTA server that was asked.
+    func applyManta(_ result: MantaShadowResult, serverURL: String) {
+        mantaServerURL = serverURL
+        mantaJudgedAt = result.judgedAt
+        let judgement: MantaJudgement?
+        switch result.outcome {
+        case .judged(let judged):
+            mantaOutcome = "judged"
+            mantaError = nil
+            judgement = judged
+        case .unreachable(let message):
+            mantaOutcome = "unreachable"
+            mantaError = String(message.prefix(WorkflowConstants.mantaErrorMaxLength))
+            judgement = nil
+        case .failed(let message):
+            mantaOutcome = "failed"
+            mantaError = String(message.prefix(WorkflowConstants.mantaErrorMaxLength))
+            judgement = nil
+        }
+        mantaJudgementID = judgement?.judgementID
+        mantaRevision = judgement?.revision
+        mantaExpectedScore = judgement?.expectedScore
+        mantaRelevanceJSON = judgement.flatMap { Self.jsonObject($0.relevanceProbabilities) }
+        mantaVerdict = judgement?.verdict
+        mantaCutoff = judgement?.cutoff
+        mantaDesign = judgement?.design
+        mantaDesignProbability = judgement?.designProbability
+        mantaDesignJSON = judgement?.designProbabilities.flatMap { Self.jsonObject($0) }
+    }
+
+    private static func jsonObject(_ probabilities: [String: Double]) -> String? {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .sortedKeys
+        return (try? encoder.encode(probabilities)).flatMap { String(data: $0, encoding: .utf8) }
     }
 
     // MARK: - Retraction
@@ -912,6 +1007,8 @@ final class Document {
         doi = metadata.doi
         pmcId = metadata.pmcId
         meshTerms = metadata.meshTerms
+        medlineStatus = metadata.medlineStatus
+        indexingMethod = metadata.indexingMethod
         publicationDate = metadata.publicationDate
         isPreprint = metadata.isPreprint
         identifierKind = metadata.identifierKind
