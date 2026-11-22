@@ -29,10 +29,11 @@ import threading
 import time
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
+from urllib.parse import urlsplit
 
 from .analysis_failures import redact_secrets
 from .config import LiteConfig
-from .constants import MANTA_ERROR_MAX_CHARS
+from .constants import MANTA_ERROR_MAX_CHARS, MANTA_LOOPBACK_HOSTS, MANTA_URL_SCHEMES
 from .data_models import LiteDocument
 from .manta_client import MantaClient, MantaRefused, MantaUnreachable
 from .manta_store import (
@@ -158,17 +159,43 @@ class MantaShadow:
 
 
 _shadows: dict[str, MantaShadow] = {}
+_refused: set[str] = set()
 _lock = threading.Lock()
+
+
+def is_loopback_manta_url(url: str) -> bool:
+    """Whether url is an http(s) URL on this machine (``MANTA_LOOPBACK_HOSTS``).
+
+    Args:
+        url: The configured MANTA server URL.
+
+    Returns:
+        True for an http or https URL whose host is 127.0.0.1 or localhost
+        (case-insensitive); False for anything else, a URL without a scheme
+        included.
+    """
+    try:
+        parts = urlsplit(url)
+    except ValueError:
+        return False
+    return parts.scheme.lower() in MANTA_URL_SCHEMES and parts.hostname in MANTA_LOOPBACK_HOSTS
 
 
 def shadow_for(config: LiteConfig) -> MantaShadow | None:
     """The process-wide shadow for the configured server; None when off.
 
     Args:
-        config: The configuration; ``manta.url`` empty means off.
+        config: The configuration; ``manta.url`` empty means off, and a URL
+            not on this machine is refused (logged once per URL).
     """
     url = config.manta.url
     if not url:
+        return None
+    if not is_loopback_manta_url(url):
+        with _lock:
+            if url not in _refused:
+                _refused.add(url)
+                logger.info("MANTA shadow off: %s is not a localhost URL", url)
         return None
     with _lock:
         if url not in _shadows:
@@ -180,3 +207,4 @@ def _reset_for_tests() -> None:
     """Forget every cached shadow (their daemon threads idle on)."""
     with _lock:
         _shadows.clear()
+        _refused.clear()

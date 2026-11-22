@@ -1619,3 +1619,6 @@ MANTA_DEFAULT_URL = ""
 MANTA_REQUEST_TIMEOUT_SECONDS = 60
 MANTA_APP_NAME = "desktop"
 MANTA_ERROR_MAX_CHARS = 500
+# The MANTA server binds 127.0.0.1 only; any other host is refused (spec: localhost only).
+MANTA_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost"})
+MANTA_URL_SCHEMES = frozenset({"http", "https"})

@@ -76,7 +76,7 @@ retraction_screen.py  # Pure: RetractionScreen (kept/excluded), screen_with_fall
 retraction_text.py    # Reader-facing retraction sentences (notice, causes, status lines)
 manta_client.py       # MantaClient: the local MANTA-4B server's judge and reference calls; MantaUnreachable, MantaRefused
 manta_store.py        # manta_judgements table, MantaRow: one row per shadow attempt (judged / unreachable / failed)
-manta_shadow.py       # MantaShadow: background worker judging every LLM-scored paper beside the LLM; shadow_for (off without a URL)
+manta_shadow.py       # MantaShadow: background worker judging every LLM-scored paper beside the LLM; shadow_for (off without a localhost URL); is_loopback_manta_url
 keyed_service_session.py # KeyedServiceSession: a keyed service's 429 pause, refused key, refused network (process-wide)
 bot_walls.py          # Bot-wall challenge pages recognised from an answer (#480): WALL_MARKERS, challenge_markers
 pdf_download.py       # PDF download helpers: body prefix, .part, .unchecked and .held files, MAX_PDF_SIZE

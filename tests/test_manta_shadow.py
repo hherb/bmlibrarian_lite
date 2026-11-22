@@ -213,3 +213,32 @@ def test_scoring_hook_observes_success_only():
 def test_shadow_off_by_default():
     """No URL, no shadow."""
     assert manta_shadow.shadow_for(LiteConfig()) is None
+
+
+@pytest.mark.parametrize(
+    "url", ["http://127.0.0.1:8765", "http://localhost:8765", "HTTPS://LocalHost:1"]
+)
+def test_loopback_urls_accepted(url):
+    """A localhost URL is accepted."""
+    assert manta_shadow.is_loopback_manta_url(url)
+
+
+@pytest.mark.parametrize(
+    "url", ["https://example.org", "http://10.0.0.3:8765", "localhost:8765", ""]
+)
+def test_other_urls_refused(url):
+    """Any other host, or no scheme, is refused."""
+    assert not manta_shadow.is_loopback_manta_url(url)
+
+
+def test_shadow_for_refuses_a_remote_url(tmp_path, caplog):
+    """A non-localhost URL gives no shadow, logged once."""
+    config = LiteConfig()
+    config.storage.data_dir = tmp_path / "data"
+    config.manta.url = "http://10.0.0.3:8765"
+    with caplog.at_level("INFO", logger="bmlibrarian_lite.manta_shadow"):
+        assert manta_shadow.shadow_for(config) is None
+        assert manta_shadow.shadow_for(config) is None
+    assert sum("localhost" in r.getMessage() for r in caplog.records) == 1
+    config.manta.url = "http://127.0.0.1:8765"
+    assert manta_shadow.shadow_for(config) is not None

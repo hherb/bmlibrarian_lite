@@ -21,7 +21,8 @@ apps additionally carry their own store version tags (`swift_*`, `appstore_*`).
   MANTA's judgement, or why there was none, is stored per paper (desktop
   `manta_judgements`, the app's `Document`) and the LLM's score is posted
   back as the reference, with the paper's PubMed indexing. Nothing the reader
-  sees changes, and scoring never waits for or fails because of MANTA. Off by
+  sees changes, and scoring never waits for or fails because of MANTA. Both
+  apps accept a localhost URL only (`127.0.0.1` or `localhost`). Off by
   default.
 - **Apps: every search query a fact check ran is shown, with what each
   found.** The iOS/macOS and Android apps showed only the first query the
