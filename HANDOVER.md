@@ -152,6 +152,11 @@ git pin). Snapshot rows keep `run_status`/`run_deciding` as set-once facts.
 
 ## Recently landed (context)
 
+- **MANTA-4B shadow stage** (`tools/manta_server/`; start the server as its
+  `README.md` says). With `manta.url` (desktop) or *Settings → LLM → MANTA*
+  (macOS) set, every LLM-scored paper is judged by MANTA in the background and
+  the judgement, or why there was none, is stored per paper
+  (`manta_judgements`, `Document.manta*`); the run never waits for it.
 - **Strict service JSON** (#781, #784): every service's JSON but esearch is
   read strictly (desktop `search_failures.strict_response_json`, **a test
   double scripts `.content`, never `.json()`**; Android `strictJsonElement`).
@@ -165,25 +170,18 @@ git pin). Snapshot rows keep `run_status`/`run_deciding` as set-once facts.
   `@Observable` property `inout`** (#697; pass a `ReferenceWritableKeyPath`).
 - **Cut-off, refused, unknown-stop answers** (#629, #631, #637; PRs #630, #632, #636, #638): `TruncatedResponseError` (`.content` kept; smart search searches its complete queries, `smart_search_notice`), `RefusedResponseError` (never retried); an unknown stop reason is read as finished unless the whole token limit was generated. **A test stubbing the reporting or interrogation answer patches `_chat_prose`.**
 - **Desktop: Find More Evidence** (PR #628) scores **into the reviewed run's
-  checkpoint**; smart search is told every query already run. **Retry Full
-  Text** (PR #622; *Settings → Full Text*, off by default, from score 4)
-  replaces citations only when the text yields passages; **`citation_reads`**
-  records what each paper's last extraction read (no row = unread). **Every
-  LLM text path map-reduces over `chunking.analysis_windows`** (16,000-char
-  windows, 250 overlap, no reference list, **one window failing fails the
-  paper**, never `text[:N]`; contract `text_windows.json`).
-- **bmlib: the FFI pin and the port set** (#583; PRs #564–#570, #572). The
-  pin names bmlib `main` (`747e7a80`, bmlib PR #785); `android-tests.yml`
-  builds bmlib there and fails if an FFI test skips or the contract copy drifts; **the committed xcframework is
-  `bmlib-xcframework.yml`'s own build** (re-pin from its artifact as its
-  header says). **`doc/cross_platform/bmlib_sync/ledger.json` records every
-  bmlib change per platform**: a sync bumps `bmlib_commit` and triages every
-  id `scripts/check_bmlib_ledger.py --bmlib ~/src/bmlib` lists (the weekly
-  `bmlib drift` workflow fails until then). Contracts `pmid_canonical.json`,
-  `score_values.json` (an unreadable score is a parse failure, never 3),
-  `europepmc_free_pdf.json`; converter **6**, analyser **2.7**. bmlib's Rust is
-  consumed through UniFFI (`BmlibFFI`): the retraction checks and the shared
-  paper library call it in production. Open: #573–#581, #585, #587.
+  checkpoint**; **Retry Full Text** (PR #622) replaces citations only when the
+  text yields passages (`citation_reads`). **Every LLM text path map-reduces
+  over `chunking.analysis_windows`** (16,000-char windows, 250 overlap, **one
+  window failing fails the paper**, never `text[:N]`).
+- **bmlib: the FFI pin and the port set** (#583). The pin names bmlib `main`
+  (`747e7a80`); `android-tests.yml` fails if an FFI test skips or the contract
+  copy drifts; **the committed xcframework is `bmlib-xcframework.yml`'s own
+  build**. **`doc/cross_platform/bmlib_sync/ledger.json` records every bmlib
+  change per platform**: a sync bumps `bmlib_commit` and triages every id
+  `scripts/check_bmlib_ledger.py --bmlib ~/src/bmlib` lists (the weekly
+  `bmlib drift` workflow fails until then). An unreadable score is a parse
+  failure, never 3 (`score_values.json`). Open: #573–#581, #585, #587.
 - **Transparency, compressed** (PRs #358–#419): every no-full-text rating
   says "Limited certainty because of lack of full text access". **Score =
   clamped sum of `score_components`; High iff `high_risk_triggers` is
@@ -211,20 +209,13 @@ git pin). Snapshot rows keep `run_status`/`run_deciding` as set-once facts.
     pause, not a rate; one retry budget, not two nested; 503 is a throttle
     for Europe PMC, an outage for NCBI; loopback is never paced. Ports:
     #342 / #343.
-  - **A cancelled worker ends, and a failed pass names its cause** (#326,
-    #327, PR #333). Every `QThread` in `gui/workers.py` mixes in
-    `SingleOutcome` (asserted with a count guard — bump it when adding a
-    worker); `should_cancel` is asked before each document; `except
-    Exception` does not catch a `BaseException`; `PassOutcome` /
-    `PassFailure` refuse impossible counts. **No git in a mutation restore.**
-  - **One parser for the screen and the export** (#233/#230); a removal takes
-    machine syntax and the reader is told. **`Document.id` is an opaque UUID**
-    (#208). **An identifier is only what a source stated it to be.**
-    **Logging is not reporting** (#180/#181); a reader-facing payload is
-    typed (#184); a persisted tagged union needs named keys and a
-    `schemaVersion` (#163). **Route markup on the owning element** (#156–#175).
-    **Measure JATS prevalence from the XML, never through the parser** (#164);
-    **bmlib is ahead of Swift — port from it** (#165).
+  - **A cancelled worker ends** (#326, #327, PR #333). Every `QThread` in
+    `gui/workers.py` mixes in `SingleOutcome` (a count guard asserts it; bump
+    it when adding a worker). **No git in a mutation restore.**
+  - **`Document.id` is an opaque UUID** (#208). **An identifier is only what
+    a source stated it to be.** **Logging is not reporting** (#180/#181); a
+    persisted tagged union needs named keys and a `schemaVersion` (#163).
+    **Measure JATS prevalence from the XML, never through the parser** (#164).
   - **CI on all three platforms** (#129). **No job may gain a `paths:`
     filter.** **The Qt preflight (`.github/scripts/qt_preflight.py`, QtWebEngine
     included) runs before pytest.** No test starts a settings-dialog thread.
@@ -242,6 +233,9 @@ Open issues by family; each issue carries the detail. None blocks another.
 
 ### Next up
 
+- **MANTA shadow report** (maintainer): run real fact checks with the server
+  up, then `python tools/manta_server/manta_server.py report`. The screening
+  stage (spec §5) gets its own spec revision after that report.
 - **From the bmlib syncs.** PR #757's issues are fixed and unreleased (a
   0.6.1 is the maintainer's call; PRs #765–#767, #771, #774, #775). Still
   deferred: #768, #769 (apps' Ollama), #770 (prompts ask for null), #773

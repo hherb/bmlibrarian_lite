@@ -53,7 +53,10 @@ final class FactCheckWorkflow {
 
     // MARK: - State
 
-    private(set) var session: FactCheckSession?
+    private(set) var session: FactCheckSession? {
+        // a shadow judging another session's papers must not write into this one's
+        didSet { if session?.id != oldValue?.id { cancelMantaShadow() } }
+    }
     private(set) var isRunning = false
     private(set) var progressMessage = ""
 
@@ -197,6 +200,14 @@ final class FactCheckWorkflow {
 
     /// This run's retraction screen so far.
     private var retractionRun = RetractionRun(generation: 0)
+
+    /// The MANTA shadow judging the session's scored papers, with the session and
+    /// server it was made for; `nil` when none is running.
+    private var mantaShadow: (token: UUID, sessionID: UUID, serverURL: String, shadow: MantaShadow)?
+
+    /// The MANTA service and server URL tests inject (``useMantaService(_:serverURL:)``);
+    /// `nil` uses a ``MantaService`` at the settings' URL.
+    private var mantaOverride: (service: MantaJudging, serverURL: String)?
 
     /// What a stop left undone beside a report that stands, for the screen to
     /// show.
@@ -1233,6 +1244,7 @@ final class FactCheckWorkflow {
         guard isRunning else { return nil }
 
         isCancelling = true
+        cancelMantaShadow()
         // Cooperative cancellation. The task is kept, not cleared: it has not
         // ended yet, and the next work waits for it.
         workflowTask?.cancel()
@@ -1443,6 +1455,84 @@ final class FactCheckWorkflow {
     ///   unchecked for the run, but those their own label retracts.
     func useRetractionCheck(_ check: @escaping RetractionCheck) {
         retractionCheck = check
+    }
+
+    /// Gives the workflow its MANTA service and server URL, in place of a
+    /// ``MantaService`` at the settings' URL, for tests.
+    ///
+    /// - Parameters:
+    ///   - service: Judges the scored papers.
+    ///   - serverURL: The server recorded on each judged document.
+    func useMantaService(_ service: MantaJudging, serverURL: String) {
+        mantaOverride = (service, serverURL)
+    }
+
+    // MARK: - MANTA Shadow
+
+    /// Hands a successfully scored paper to the MANTA shadow, off the scoring path.
+    ///
+    /// Does nothing when no MANTA URL is set. What MANTA makes of the paper is
+    /// stored on the document only; the fact check never reads it.
+    ///
+    /// - Parameters:
+    ///   - document: The scored paper.
+    ///   - score: The LLM's score.
+    ///   - session: The session it was scored in.
+    private func observeForManta(_ document: Document, score: Int, in session: FactCheckSession) {
+        guard let shadow = mantaShadow(for: session) else { return }
+        let item = MantaShadowItem(
+            pmid: document.pmid, claim: session.claim, title: document.title, abstract: document.abstract,
+            ids: Self.mantaIDs(of: document), llmScore: score, llmModel: settings.llmModel,
+            indexing: Self.mantaIndexing(of: document))
+        Task { await shadow.observe(item) }
+    }
+
+    /// The session's running shadow, or a new one when the session or the URL
+    /// changed; `nil` when the URL is empty or does not parse.
+    private func mantaShadow(for session: FactCheckSession) -> MantaShadow? {
+        let serverURL = mantaOverride?.serverURL ?? settings.mantaURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let current = mantaShadow, current.sessionID == session.id, current.serverURL == serverURL {
+            return current.shadow
+        }
+        cancelMantaShadow()
+        guard !serverURL.isEmpty, let url = URL(string: serverURL) else { return nil }
+        let token = UUID()
+        let sessionID = session.id
+        let shadow = MantaShadow(service: mantaOverride?.service ?? MantaService(baseURL: url)) { [weak self] result in
+            self?.applyManta(result, token: token, serverURL: serverURL)
+        }
+        mantaShadow = (token, sessionID, serverURL, shadow)
+        return shadow
+    }
+
+    /// Stores a shadow result on its document, unless its shadow was cancelled or replaced.
+    private func applyManta(_ result: MantaShadowResult, token: UUID, serverURL: String) {
+        guard mantaShadow?.token == token, let session,
+              let document = (session.documents ?? []).first(where: { $0.pmid == result.pmid }) else { return }
+        document.applyManta(result, serverURL: serverURL)
+        try? modelContext.save()
+    }
+
+    /// Stops the running shadow: its pending papers are dropped and nothing more is stored.
+    private func cancelMantaShadow() {
+        guard let shadow = mantaShadow?.shadow else { return }
+        mantaShadow = nil
+        Task { await shadow.cancel() }
+    }
+
+    /// The paper's identifiers MANTA's ledger records, the present ones only.
+    static func mantaIDs(of document: Document) -> [String: String] {
+        let pmcID = document.pmcId?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let ids = ["pmid": document.pubmedID, "doi": document.usableDOI, "pmc_id": pmcID]
+        return ids.compactMapValues { $0?.isEmpty == false ? $0 : nil }
+    }
+
+    /// The paper's PubMed indexing, as the desktop sends it; `nil` for a paper with no PubMed ID.
+    static func mantaIndexing(of document: Document) -> MantaIndexing? {
+        guard document.pubmedID != nil else { return nil }
+        return MantaIndexing(
+            publicationTypes: document.publicationTypes ?? [], meshTerms: document.meshTerms,
+            medlineStatus: document.medlineStatus, indexingMethod: document.indexingMethod)
     }
 
     // MARK: - Phase 4 Error Handling
@@ -2835,6 +2925,7 @@ final class FactCheckWorkflow {
             if score >= settings.minScoreThreshold {
                 session.relevantDocumentsFound += 1
             }
+            observeForManta(document, score: score, in: session)
         } else {
             // Scoring failed (network error or parse failure)
             document.scoreParseFailed = true
@@ -4020,6 +4111,7 @@ final class FactCheckWorkflow {
                 if score >= settings.minScoreThreshold {
                     session.relevantDocumentsFound += 1
                 }
+                observeForManta(document, score: score, in: session)
             } else {
                 document.scoreParseFailed = true
                 document.scoreExplanation = result.rationale ?? result.errorMessage

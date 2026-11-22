@@ -100,7 +100,7 @@ tools/manta_server/   # Stand-alone MANTA-4B server: localhost HTTP, ledger, rep
 
 **iOS + macOS** (`ios/MedicalFactChecker/`, multiplatform project; macOS-specific views under `Sources/macOS/`):
 - SwiftUI + SwiftData models (Document, FactCheckSession, SearchProvider, FullTextSource, SchemaVersions)
-- Services: FactCheckWorkflow, LLMService, EmbeddingService, ParallelScoringService, ParallelCitationService, CheckpointedScoringService, CheckpointManager, ModelFetchService, CloudKitConfiguration, BackgroundTaskManager
+- Services: FactCheckWorkflow, LLMService, EmbeddingService, ParallelScoringService, ParallelCitationService, CheckpointedScoringService, CheckpointManager, ModelFetchService, CloudKitConfiguration, BackgroundTaskManager, MantaShadow (the MANTA shadow benchmark, off the scoring path)
 - Views: FactCheck, FullText, History, Report, Settings, Onboarding
 - Components: TransparencyDetailView, TransparencyRiskBadge, TransparencySummarySection, ErrorQueueView, ProcessingProgressView
 
@@ -117,7 +117,7 @@ tools/manta_server/   # Stand-alone MANTA-4B server: localhost HTTP, ledger, rep
 
 Shared iOS/macOS components:
 - `JATS/`: XML parsing → HTML/Markdown (JATSXMLParser, JATSModels)
-- `Services/`: EuropePMCService, PubMedService, FullTextService (split by concern into `FullTextService+<concern>.swift` extensions), PMCOpenData (PMC's open-data bucket), OpenAlex, CORE (extracted text), Elsevier (PDFs, with a key), KeyedServiceSession (CORE's and Elsevier's session state), BotWalls (bot-wall challenge pages), PDFTitleCheck (another article's PDF)
+- `Services/`: EuropePMCService, PubMedService (MeSH, MEDLINE status, indexing method), FullTextService (split by concern into `FullTextService+<concern>.swift` extensions), PMCOpenData (PMC's open-data bucket), OpenAlex, CORE (extracted text), Elsevier (PDFs, with a key), KeyedServiceSession (CORE's and Elsevier's session state), BotWalls (bot-wall challenge pages), PDFTitleCheck (another article's PDF), MantaService (the local MANTA server)
 - `Transparency/`: Study transparency analysis
   - `Analysis/`: TransparencyScorer, FundingAnalyzer, COIAnalyzer, DataAvailabilityAnalyzer, TrialComplianceAnalyzer
   - `Models/`: TransparencyModels, TransparencyConstants

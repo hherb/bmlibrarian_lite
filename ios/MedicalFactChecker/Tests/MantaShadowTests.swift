@@ -15,6 +15,7 @@
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 import BioMedLit
+import SwiftData
 import XCTest
 @testable import MedicalFactChecker
 
@@ -96,6 +97,42 @@ private func item(_ pmid: String, score: Int = 4) -> MantaShadowItem {
         indexing: MantaIndexing(
             publicationTypes: ["Journal Article"], meshTerms: ["Humans"], medlineStatus: "MEDLINE",
             indexingMethod: "Manual"))
+}
+
+/// Scores the paper titled "Good paper" 4 and refuses any other with a 400, so the real scoring loop runs offline.
+private final class ScoringStubProtocol: URLProtocol {
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
+    override func startLoading() {
+        let good = Self.body(of: request).range(of: Data("Good paper".utf8)) != nil
+        let content = #"{"score": 4, "explanation": "on topic"}"#
+        let payload = try! JSONSerialization.data(withJSONObject: good
+            ? ["choices": [["message": ["role": "assistant", "content": content], "finish_reason": "stop"]]]
+            : ["error": ["message": "bad request"]])
+        let http = HTTPURLResponse(url: request.url!, statusCode: good ? 200 : 400, httpVersion: nil, headerFields: nil)!
+        client?.urlProtocol(self, didReceive: http, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: payload)
+        client?.urlProtocolDidFinishLoading(self)
+    }
+
+    override func stopLoading() {}
+
+    /// A protocol sees the body as a stream, not as `httpBody`.
+    private static func body(of request: URLRequest) -> Data {
+        if let body = request.httpBody { return body }
+        guard let stream = request.httpBodyStream else { return Data() }
+        stream.open()
+        defer { stream.close() }
+        var data = Data()
+        var buffer = [UInt8](repeating: 0, count: 4096)
+        while stream.hasBytesAvailable {
+            let read = stream.read(&buffer, maxLength: buffer.count)
+            guard read > 0 else { break }
+            data.append(buffer, count: read)
+        }
+        return data
+    }
 }
 
 final class MantaShadowTests: XCTestCase {
@@ -304,5 +341,84 @@ final class MantaShadowTests: XCTestCase {
         XCTAssertEqual(document.meshTerms, ["Humans", "Aspirin"])
         XCTAssertEqual(document.medlineStatus, "MEDLINE")
         XCTAssertEqual(document.indexingMethod, "Automated")
+    }
+
+    /// A workflow showing a session of two PubMed papers, scoring "Good paper" 4 and failing "Bad paper",
+    /// judging with `stub`. The container is returned to keep the store alive.
+    @MainActor
+    private func scoringWorkflow(_ stub: StubJudge) throws -> (FactCheckWorkflow, [Document], ModelContainer) {
+        let container = try ModelContainer(
+            for: Schema(versionedSchema: SchemaV2.self),
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+        let context = ModelContext(container)
+        let session = FactCheckSession(claim: "Does X help Y?")
+        context.insert(session)
+        let documents = [("111", "Good paper"), ("222", "Bad paper")].map { pmid, title in
+            let document = Document(pmid: pmid, title: title, abstract: "An abstract.")
+            document.identifierKind = .pubmed
+            document.doi = "10.1000/\(pmid)"
+            document.medlineStatus = "MEDLINE"
+            context.insert(document)
+            document.session = session
+            return document
+        }
+        try context.save()
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [ScoringStubProtocol.self]
+        let workflow = FactCheckWorkflow(modelContext: context, modelContainer: container, settings: .shared)
+        workflow.restoreForViewing(session)
+        workflow.useServices(
+            llm: LLMService(
+                baseURL: URL(string: "https://stub.invalid/v1")!, apiKey: "k", model: "m",
+                session: URLSession(configuration: config)),
+            pubMed: BMLPubMedService.create(from: .shared))
+        workflow.useRetractionCheck { _ in [:] }
+        workflow.useMantaService(stub, serverURL: "http://127.0.0.1:8765")
+        return (workflow, documents, container)
+    }
+
+    /// The workflow hands MANTA each successfully scored paper, with its score and the model; a failed score is not.
+    @MainActor
+    func testWorkflowObservesOnlySuccessfulScores() async throws {
+        let stub = StubJudge()
+        let (workflow, documents, _) = try scoringWorkflow(stub)
+
+        try await workflow.scoreNewDocuments(documents.map(\.pmid))
+        for _ in 0..<200 where documents[0].mantaOutcome == nil {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+
+        XCTAssertEqual(documents[0].relevanceScore, 4)
+        XCTAssertTrue(documents[1].scoreParseFailed, "control: the second paper's scoring failed")
+        let calls = await stub.calls
+        XCTAssertEqual(calls, ["judge 111", "reference j-111"])
+        let references = await stub.references
+        XCTAssertEqual(references.map(\.llmScore), [4])
+        XCTAssertEqual(references.map(\.llmModel), [AppSettings.shared.llmModel])
+        XCTAssertEqual(references.first?.indexing?.medlineStatus, "MEDLINE")
+        XCTAssertEqual(documents[0].mantaOutcome, "judged")
+        XCTAssertEqual(documents[0].mantaServerURL, "http://127.0.0.1:8765")
+        XCTAssertNil(documents[1].mantaOutcome)
+    }
+
+    /// A shadow's result arriving after the workflow moved to another session is not stored.
+    @MainActor
+    func testAnotherSessionDropsTheShadow() async throws {
+        let stub = StubJudge()
+        await stub.hold()
+        let (workflow, documents, container) = try scoringWorkflow(stub)
+
+        try await workflow.scoreNewDocuments(documents.map(\.pmid))
+        await stub.waitUntilHeld()
+        let other = FactCheckSession(claim: "Another claim")
+        ModelContext(container).insert(other)
+        workflow.restoreForViewing(other)
+        await stub.release()
+        try await Task.sleep(for: .milliseconds(100))
+
+        XCTAssertEqual(documents[0].relevanceScore, 4, "control: the paper was scored")
+        let calls = await stub.calls
+        XCTAssertEqual(calls, ["judge 111"], "the cancelled shadow posts no reference")
+        XCTAssertNil(documents[0].mantaOutcome)
     }
 }
