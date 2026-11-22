@@ -155,9 +155,13 @@ public enum SearchResultMerger {
     ///   - merged: The kept records; the first sharing an identifier takes the
     ///     types, else the first ``areDuplicates(_:_:)`` match (a similar title).
     private static func absorbPublicationTypes(of duplicate: SearchArticle, into merged: inout [SearchArticle]) {
-        guard let types = duplicate.publicationTypes,
-              let index = merged.firstIndex(where: { sharesIdentifier($0, duplicate) })
+        guard let index = merged.firstIndex(where: { sharesIdentifier($0, duplicate) })
                 ?? merged.firstIndex(where: { areDuplicates($0, duplicate) }) else { return }
+        // PubMed's indexing: the kept record's own wins, else the duplicate's.
+        merged[index].meshTerms = merged[index].meshTerms ?? duplicate.meshTerms
+        merged[index].medlineStatus = merged[index].medlineStatus ?? duplicate.medlineStatus
+        merged[index].indexingMethod = merged[index].indexingMethod ?? duplicate.indexingMethod
+        guard let types = duplicate.publicationTypes else { return }
         var union = merged[index].publicationTypes ?? []
         for type in types where !union.contains(type) { union.append(type) }
         merged[index].publicationTypes = union
