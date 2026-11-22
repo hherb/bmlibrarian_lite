@@ -199,8 +199,10 @@ class MantaService:
         ):
             raise BadRequest("ids must map strings to strings")
         tasks = payload.get("tasks", list(ALL_TASKS))
-        if not isinstance(tasks, list) or not tasks or not set(tasks) <= set(ALL_TASKS):
-            raise BadRequest(f"tasks must be a non-empty list of {list(ALL_TASKS)}")
+        if not isinstance(tasks, list) or not set(tasks) <= set(ALL_TASKS):
+            raise BadRequest(f"tasks must be a list of {list(ALL_TASKS)}")
+        if TASK_RELEVANCE not in tasks:  # the ledger's verdict columns need a relevance run
+            raise BadRequest("tasks must include 'relevance'")
 
         jid = str(uuid.uuid4())
         started = time.monotonic()
@@ -213,12 +215,16 @@ class MantaService:
             if TASK_RELEVANCE in tasks:
                 out = self._predictor.predict(mp.relevance_request(jid, question, title, abstract))
                 raw = out["questions"][Q_RELEVANCE]["probabilities"]
+                if not _finite(raw):
+                    raise ArithmeticError("model gave non-finite relevance probabilities")
                 score = mp.expected_score(raw)
                 rel_probs = mp.app_scale(raw)
                 tokens, truncated = max(tokens, out["prompt_tokens"]), truncated or out["truncated"]
             if TASK_DESIGN in tasks:
                 out = self._predictor.predict(mp.design_request(jid, title, abstract))
                 q = out["questions"][Q_DESIGN]
+                if not _finite(q["probabilities"]):
+                    raise ArithmeticError("model gave non-finite design probabilities")
                 design = {
                     "probabilities": q["probabilities"],
                     "answer": q["answer"],

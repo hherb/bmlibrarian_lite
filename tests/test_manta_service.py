@@ -116,6 +116,24 @@ def test_judge_relevance_only(make):
     assert len(r.fake.requests) == 1
 
 
+def test_judge_design_only_refused(make):
+    """Design only refused."""
+    r = make()
+    resp = requests.post(r.url + "/v1/judge", json={**BODY, "tasks": ["design"]}, timeout=5)
+    assert resp.status_code == 400
+    assert "relevance" in resp.json()["error"]
+    assert ml.rows(r.conn) == []
+
+
+def test_judge_non_finite_is_500_and_not_recorded(make):
+    """Non finite is 500 and not recorded."""
+    r = make(FakeManta(relevance={"0": float("nan"), "1": 1.0}))
+    resp = requests.post(r.url + "/v1/judge", json=BODY, timeout=5)
+    assert resp.status_code == 500
+    assert "non-finite" in resp.json()["error"]
+    assert ml.rows(r.conn) == []
+
+
 def test_judge_empty_abstract(make):
     """Judge empty abstract."""
     r = make()
