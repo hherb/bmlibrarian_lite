@@ -15,7 +15,7 @@
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 
-"""Command line of the MANTA judging server: serve, make-selftest."""
+"""Command line of the MANTA judging server: serve, make-selftest, report."""
 
 from __future__ import annotations
 
@@ -28,6 +28,7 @@ from pathlib import Path
 import manta_ledger as ml
 import manta_model as mm
 import manta_protocol as mp
+import manta_report as mr
 import manta_service as ms
 
 logger = logging.getLogger("manta_server")
@@ -106,6 +107,17 @@ def make_selftest(args: argparse.Namespace) -> None:
     )
 
 
+def report(args: argparse.Namespace) -> None:
+    """Prints the comparison report over the given ledgers."""
+    paths = [p.expanduser() for p in args.ledgers] or [DEFAULT_LEDGER.expanduser()]
+    try:
+        rows = mr.load_rows(paths)
+    except FileNotFoundError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        sys.exit(1)
+    print(mr.render(mr.relevance_report(rows), mr.design_report(rows)), end="")
+
+
 def main(argv: list[str] | None = None) -> None:
     """Parses the command line and runs a command."""
     parser = argparse.ArgumentParser(description="MANTA judging server")
@@ -119,6 +131,9 @@ def main(argv: list[str] | None = None) -> None:
             p.add_argument("--port", type=int, default=ms.DEFAULT_PORT)
             p.add_argument("--ledger", type=Path, default=DEFAULT_LEDGER)
             p.add_argument("--any-revision", action="store_true")
+    p = sub.add_parser("report")
+    p.add_argument("ledgers", nargs="*", type=Path)
+    p.set_defaults(fn=report)
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     args.fn(args)
