@@ -21,6 +21,7 @@ from __future__ import annotations
 import socket
 import sys
 import threading
+import time
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -132,6 +133,24 @@ def test_outage_then_recovery_per_paper(server, storage):
     assert storage.manta_judgements("pmid-2")[0].outcome == "judged"
 
 
+def test_observe_never_waits_for_a_silent_server(storage):
+    """Scoring hands papers over at once, even when MANTA never answers."""
+    sock = socket.socket()
+    sock.bind(("127.0.0.1", 0))
+    sock.listen(8)  # accepts, never answers
+    url = f"http://127.0.0.1:{sock.getsockname()[1]}"
+    shadow = MantaShadow(MantaClient(url, timeout=0.5), storage, url)
+    started = time.monotonic()
+    for n in ("1", "2", "3"):
+        shadow.observe("q", _doc(n), 4, "m")
+    assert time.monotonic() - started < 0.25
+    assert not shadow.drain(0.1)
+    assert shadow.drain(DRAIN_SECONDS)
+    sock.close()
+    for n in ("1", "2", "3"):
+        assert storage.manta_judgements(f"pmid-{n}")[0].outcome == "unreachable"
+
+
 def test_refused_is_failed(server, storage):
     """A not-ready server: a failed row with the error text."""
     url, _ = server(passed=False)
@@ -224,7 +243,21 @@ def test_loopback_urls_accepted(url):
 
 
 @pytest.mark.parametrize(
-    "url", ["https://example.org", "http://10.0.0.3:8765", "localhost:8765", ""]
+    "url",
+    [
+        "https://example.org",
+        "http://10.0.0.3:8765",
+        "localhost:8765",
+        "",
+        "http://evil.com\\@127.0.0.1:8765",
+        "http://127.0.0.1@evil.com:8765",
+        "http://localhost@evil.com",
+        "http://localhost.evil.com",
+        "http://127.0.0.1.nip.io",
+        "http://evil.com/127.0.0.1",
+        "http://evil.com?h=localhost",
+        "http://evil.com#localhost",
+    ],
 )
 def test_other_urls_refused(url):
     """Any other host, or no scheme, is refused."""

@@ -45,6 +45,30 @@ private final class MantaStubURLProtocol: URLProtocol {
     override func stopLoading() {}
 }
 
+/// Redirects every request to another host, as a hostile local listener might.
+private final class MantaRedirectURLProtocol: URLProtocol {
+    nonisolated(unsafe) static var followed = false
+
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
+    override func startLoading() {
+        if request.url?.host == "example.org" {
+            Self.followed = true
+        }
+        let response = HTTPURLResponse(
+            url: request.url!, statusCode: 307, httpVersion: nil,
+            headerFields: ["Location": "http://example.org/v1/judge"])!
+        var next = request
+        next.url = URL(string: "http://example.org/v1/judge")
+        client?.urlProtocol(self, wasRedirectedTo: next, redirectResponse: response)
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocolDidFinishLoading(self)
+    }
+
+    override func stopLoading() {}
+}
+
 final class MantaServiceTests: XCTestCase {
     private let judgeJSON = """
     {"judgement_id": "abc", "revision": "r1", "seconds": 0.1, "prompt_tokens": 512, "truncated": false,
@@ -160,6 +184,35 @@ final class MantaServiceTests: XCTestCase {
             XCTFail("expected refusal")
         } catch {
             XCTAssertEqual(error as? MantaServiceError, .refused(status: 404, message: "unknown judgement"))
+        }
+    }
+
+    func testTheDefaultSessionUsesNoProxy() {
+        XCTAssertEqual(MantaService.localSession.configuration.connectionProxyDictionary?.isEmpty, true)
+    }
+
+    func testARedirectIsRefusedNotFollowed() async {
+        MantaRedirectURLProtocol.followed = false
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [MantaRedirectURLProtocol.self]
+        let service = MantaService(
+            baseURL: URL(string: "http://127.0.0.1:8765")!, session: MantaService.makeLocalSession(config))
+        do {
+            _ = try await service.judge(request)
+            XCTFail("expected refusal")
+        } catch {
+            XCTAssertEqual(error as? MantaServiceError, .refused(status: 307, message: ""))
+        }
+        XCTAssertFalse(MantaRedirectURLProtocol.followed, "the paper went to the redirect's host")
+    }
+
+    func testANonJSONErrorKeepsItsText() async {
+        MantaStubURLProtocol.answer = (502, "Bad Gateway")
+        do {
+            _ = try await service().judge(request)
+            XCTFail("expected refusal")
+        } catch {
+            XCTAssertEqual(error as? MantaServiceError, .refused(status: 502, message: "Bad Gateway"))
         }
     }
 }

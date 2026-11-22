@@ -62,10 +62,11 @@ struct MantaShadowResult: Sendable {
     let referencePosted: Bool
 }
 
-/// Judges each observed paper with MANTA, one at a time in order, off the scoring path.
+/// Judges each observed paper with MANTA, one at a time in the order they reach it, off the scoring path.
 ///
-/// The shadow never changes the fact check: its results go only to `onResult`.
-/// ``cancel()`` is terminal: a cancelled shadow judges and delivers nothing more.
+/// The shadow never changes the fact check: its results go only to `onResult`, which answers
+/// whether to go on. ``cancel()``, or a `false` from `onResult`, is terminal: the shadow then
+/// judges and delivers nothing more.
 actor MantaShadow {
     /// The app name the server's ledger records.
     static let app = "macos"
@@ -74,13 +75,13 @@ actor MantaShadow {
 
     private let logger = Logger(subsystem: "com.bmlibrarian.factchecker", category: "MantaShadow")
     private let service: MantaJudging
-    private let onResult: @MainActor @Sendable (MantaShadowResult) -> Void
+    private let onResult: @MainActor @Sendable (MantaShadowResult) -> Bool
     private var pending: [MantaShadowItem] = []
     private var worker: Task<Void, Never>?
     /// Set by ``cancel()``, never cleared: no request after a Stop, no stray result.
     private var cancelled = false
 
-    init(service: MantaJudging, onResult: @escaping @MainActor @Sendable (MantaShadowResult) -> Void) {
+    init(service: MantaJudging, onResult: @escaping @MainActor @Sendable (MantaShadowResult) -> Bool) {
         self.service = service
         self.onResult = onResult
     }
@@ -107,7 +108,8 @@ actor MantaShadow {
         while !cancelled, !pending.isEmpty {
             let item = pending.removeFirst()
             guard let result = await run(item), !cancelled else { return }
-            await onResult(result)
+            // stop before the next paper reaches the server, not after it
+            guard await onResult(result) else { return cancel() }
         }
         worker = nil
     }

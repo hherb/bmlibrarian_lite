@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+import socket
 import sys
 import threading
 from pathlib import Path
@@ -157,6 +158,16 @@ def test_judge_bad_request(make):
     assert requests.post(r.url + "/v1/judge", json=body, timeout=5).status_code == 400
     bad = requests.post(r.url + "/v1/judge", data=b"{nope", timeout=5)
     assert bad.status_code == 400
+    unhashable = requests.post(r.url + "/v1/judge", json={**BODY, "tasks": [[1]]}, timeout=5)
+    assert unhashable.status_code == 400
+    for length in ("-1", "abc"):
+        with socket.create_connection(("127.0.0.1", int(r.url.rsplit(":", 1)[1])), 5) as sock:
+            sock.settimeout(5)
+            sock.sendall(
+                f"POST /v1/judge HTTP/1.1\r\nHost: x\r\nContent-Length: {length}\r\n\r\n{{}}"
+                .encode()
+            )
+            assert sock.recv(64).startswith(b"HTTP/1.0 400"), length
 
 
 def test_not_ready_refuses(make):

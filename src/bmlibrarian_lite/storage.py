@@ -205,7 +205,8 @@ def compute_question_hash(question: str) -> str:
 # An upsert never erases a stored fact: NULL, '' and '[]' (JSON lists) mean
 # "not supplied" and keep the stored value; a non-empty value overwrites, so
 # corrections land. publication_types is the exception: '[]' there is a
-# recorded fact, distinct from NULL. created_at and the rowid (which keys the
+# recorded fact, distinct from NULL. indexing_method follows medline_status: a
+# record's status replaces the stored pair, its NULL method included. created_at and the rowid (which keys the
 # vector in vec_documents) are never touched.
 _KEEP_TEXT = "COALESCE(NULLIF(excluded.{c}, ''), documents.{c})"
 _KEEP_LIST = (
@@ -224,7 +225,10 @@ UPSERT_DOCUMENT_SQL = (
     + ", ".join(
         [f"{c} = {_KEEP_TEXT.format(c=c)}" for c in (
             "title", "abstract", "journal", "doi", "pmid", "pmc_id", "url", "source",
-            "medline_status", "indexing_method")]
+            "medline_status")]
+        # a status brings its own method: a MEDLINE record with none was indexed by hand
+        + ["indexing_method = CASE WHEN NULLIF(excluded.medline_status, '') IS NULL "
+           "THEN documents.indexing_method ELSE excluded.indexing_method END"]
         + [f"{c} = {_KEEP_LIST.format(c=c)}" for c in ("authors", "mesh_terms")]
         + ["year = COALESCE(excluded.year, documents.year)",
            "publication_types = COALESCE(excluded.publication_types, documents.publication_types)"]

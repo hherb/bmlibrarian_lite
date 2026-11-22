@@ -117,3 +117,8 @@ def test_make_selftest_refuses_no_cases(tmp_path: Path, monkeypatch) -> None:
         msrv.main(["make-selftest"])
     assert e.value.code != 0 and "no cases" in str(e.value.code)
     assert path.read_text(encoding="utf-8") == "[]"
+
+
+def test_the_committed_selftest_fixture_can_gate_serving() -> None:
+    """The shipped selftest.json is one serve accepts (a bad edit would refuse every start)."""
+    assert mm.selftest_problem(json.loads(msrv.SELFTEST_PATH.read_text())) is None

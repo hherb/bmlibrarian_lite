@@ -171,7 +171,16 @@ public struct MantaService: Sendable {
     private let baseURL: URL
     private let session: URLSession
 
-    public init(baseURL: URL, session: URLSession = .shared) {
+    /// The default session: ephemeral, no proxy and no redirect, so a paper never leaves this machine.
+    public static let localSession = makeLocalSession()
+
+    /// A session like ``localSession`` from `configuration` (tests add their own protocol classes).
+    public static func makeLocalSession(_ configuration: URLSessionConfiguration = .ephemeral) -> URLSession {
+        configuration.connectionProxyDictionary = [:]
+        return URLSession(configuration: configuration, delegate: RefuseRedirects(), delegateQueue: nil)
+    }
+
+    public init(baseURL: URL, session: URLSession = MantaService.localSession) {
         self.baseURL = baseURL
         self.session = session
     }
@@ -211,8 +220,19 @@ public struct MantaService: Sendable {
         guard let http = response as? HTTPURLResponse else { throw MantaServiceError.unreadable }
         guard (200..<300).contains(http.statusCode) else {
             let message = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["error"] as? String
-            throw MantaServiceError.refused(status: http.statusCode, message: message ?? "")
+            throw MantaServiceError.refused(
+                status: http.statusCode, message: message ?? String(decoding: data, as: UTF8.self))
         }
         return data
+    }
+}
+
+/// Answers a redirect with the redirect itself, which `MantaService` then refuses as a non-2xx.
+private final class RefuseRedirects: NSObject, URLSessionTaskDelegate, Sendable {
+    func urlSession(
+        _ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
+        newRequest request: URLRequest
+    ) async -> URLRequest? {
+        nil
     }
 }

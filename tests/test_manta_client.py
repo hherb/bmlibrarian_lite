@@ -121,3 +121,73 @@ def test_not_ready_is_refused(server):
     with pytest.raises(MantaRefused) as exc:
         MantaClient(url).judge("q", DOC)
     assert exc.value.status == 503
+
+
+def test_a_proxy_is_never_used(server, monkeypatch):
+    """A configured proxy is bypassed: the abstract stays on this machine."""
+    url, _ = server()
+    monkeypatch.setenv("HTTP_PROXY", "http://127.0.0.1:9")
+    monkeypatch.setenv("http_proxy", "http://127.0.0.1:9")
+    monkeypatch.delenv("NO_PROXY", raising=False)
+    monkeypatch.delenv("no_proxy", raising=False)
+    assert MantaClient(url).judge("q", DOC).judgement_id
+
+
+def _one_shot_server(answer: bytes) -> tuple[str, socket.socket]:
+    """A socket that reads one request and sends answer raw (then closes)."""
+    sock = socket.socket()
+    sock.bind(("127.0.0.1", 0))
+    sock.listen(1)
+
+    def serve() -> None:
+        conn, _ = sock.accept()
+        conn.recv(65536)
+        if answer:
+            conn.sendall(answer)
+            conn.close()
+        else:
+            threading.Event().wait(5)  # accept and never answer
+
+    threading.Thread(target=serve, daemon=True).start()
+    return f"http://127.0.0.1:{sock.getsockname()[1]}", sock
+
+
+def test_a_redirect_is_not_followed():
+    """A redirect elsewhere is refused, never re-posted to its Location."""
+    url, sock = _one_shot_server(
+        b"HTTP/1.1 307 Temporary Redirect\r\nLocation: http://example.org/v1/judge\r\n"
+        b"Content-Length: 0\r\n\r\n"
+    )
+    with pytest.raises(MantaRefused) as exc:
+        MantaClient(url, timeout=2).judge("q", DOC)
+    assert exc.value.status == 307
+    sock.close()
+
+
+def test_a_silent_server_is_unreachable():
+    """A server that never answers times out as unreachable, not failed."""
+    url, sock = _one_shot_server(b"")
+    with pytest.raises(MantaUnreachable):
+        MantaClient(url, timeout=0.5).judge("q", DOC)
+    sock.close()
+
+
+def test_an_answer_cut_short_is_unreachable():
+    """A connection dropped mid-answer is unreachable, not failed."""
+    url, sock = _one_shot_server(
+        b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n10\r\n{\"rel"
+    )
+    with pytest.raises(MantaUnreachable):
+        MantaClient(url, timeout=2).judge("q", DOC)
+    sock.close()
+
+
+def test_an_unreadable_2xx_is_refused():
+    """A 200 whose body is not a judgement is a refusal (failed), not a verdict."""
+    url, sock = _one_shot_server(
+        b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 2\r\n\r\n{}"
+    )
+    with pytest.raises(MantaRefused) as exc:
+        MantaClient(url, timeout=2).judge("q", DOC)
+    assert exc.value.message == "unreadable answer"
+    sock.close()

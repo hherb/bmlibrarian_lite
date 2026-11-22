@@ -17,7 +17,8 @@
 """Client of the local MANTA server (tools/manta_server): judge, then reference.
 
 The server is on loopback, so a plain requests.Session is used, not the
-polite (paced) one.
+polite (paced) one. It ignores proxy settings and never follows a redirect:
+the question and abstract must not leave this machine.
 """
 
 from __future__ import annotations
@@ -93,14 +94,23 @@ class MantaClient:
             timeout: Seconds to wait for an answer.
         """
         self._base = base_url.rstrip("/")
-        self._session = session or requests.Session()
+        if session is None:
+            session = requests.Session()
+            session.trust_env = False  # a proxy would carry the abstract off this machine
+        self._session = session
         self._timeout = timeout
 
     def _post(self, path: str, body: dict[str, Any]) -> dict[str, Any]:
         """POSTs and returns the answer's JSON object, or raises."""
         try:
-            response = self._session.post(self._base + path, json=body, timeout=self._timeout)
-        except (requests.ConnectionError, requests.Timeout) as exc:
+            response = self._session.post(
+                self._base + path, json=body, timeout=self._timeout, allow_redirects=False
+            )
+        except (
+            requests.ConnectionError,
+            requests.Timeout,
+            requests.exceptions.ChunkedEncodingError,
+        ) as exc:
             raise MantaUnreachable(type(exc).__name__) from None
         status = response.status_code
         try:

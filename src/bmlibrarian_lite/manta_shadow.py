@@ -23,6 +23,7 @@ sees changes.
 
 from __future__ import annotations
 
+import atexit
 import logging
 import queue
 import threading
@@ -30,6 +31,8 @@ import time
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from urllib.parse import urlsplit
+
+from urllib3.util import parse_url
 
 from .analysis_failures import redact_secrets
 from .config import LiteConfig
@@ -75,6 +78,12 @@ class MantaShadow:
         self._url = server_url
         self._queue: queue.Queue[_Item] = queue.Queue()
         threading.Thread(target=self._run, name="manta-shadow", daemon=True).start()
+        atexit.register(self._log_unjudged)
+
+    def _log_unjudged(self) -> None:
+        """At exit, say how many papers the daemon worker leaves without a row."""
+        if left := self._queue.unfinished_tasks:
+            logger.info("MANTA shadow: %d paper(s) left unjudged at exit", left)
 
     def observe(
         self, question: str, document: LiteDocument, llm_score: int, llm_model: str
@@ -130,6 +139,7 @@ class MantaShadow:
             self._storage.record_manta_judgement(self._failure(OUTCOME_FAILED, e.message, base))
             return
         except Exception as e:  # noqa: BLE001 - the client can raise other requests errors
+            logger.warning("MANTA judge failed for %s", doc.id, exc_info=True)
             self._storage.record_manta_judgement(
                 self._failure(OUTCOME_FAILED, str(e) or type(e).__name__, base)
             )
@@ -176,9 +186,15 @@ def is_loopback_manta_url(url: str) -> bool:
     """
     try:
         parts = urlsplit(url)
+        # requests sends by urllib3's reading, which differs on a backslash
+        sent_to = parse_url(url).host
     except ValueError:
         return False
-    return parts.scheme.lower() in MANTA_URL_SCHEMES and parts.hostname in MANTA_LOOPBACK_HOSTS
+    return (
+        parts.scheme.lower() in MANTA_URL_SCHEMES
+        and parts.hostname in MANTA_LOOPBACK_HOSTS
+        and (sent_to or "").lower() in MANTA_LOOPBACK_HOSTS
+    )
 
 
 def shadow_for(config: LiteConfig) -> MantaShadow | None:

@@ -61,4 +61,11 @@ final class MeshIndexingMergeTests: XCTestCase {
         XCTAssertEqual(merged[0].medlineStatus, "MEDLINE")
         XCTAssertEqual(merged[0].indexingMethod, "Manual")
     }
+
+    func testStatusAndMethodComeFromOneRecord() {
+        let kept = article(pmid: "4", title: "T", source: .pubmed, status: "MEDLINE")
+        let dup = article(pmid: "4", title: "T", source: .europePMC, status: "MEDLINE", method: "Automated")
+        let merged = SearchResultMerger.mergeArticles(primary: [kept], secondary: [dup])
+        XCTAssertNil(merged[0].indexingMethod, "the kept MEDLINE record with no method was indexed by hand")
+    }
 }

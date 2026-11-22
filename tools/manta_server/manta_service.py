@@ -199,7 +199,7 @@ class MantaService:
         ):
             raise BadRequest("ids must map strings to strings")
         tasks = payload.get("tasks", list(ALL_TASKS))
-        if not isinstance(tasks, list) or not set(tasks) <= set(ALL_TASKS):
+        if not isinstance(tasks, list) or not all(t in ALL_TASKS for t in tasks):
             raise BadRequest(f"tasks must be a list of {list(ALL_TASKS)}")
         if TASK_RELEVANCE not in tasks:  # the ledger's verdict columns need a relevance run
             raise BadRequest("tasks must include 'relevance'")
@@ -337,7 +337,12 @@ def make_server(service: MantaService, port: int = DEFAULT_PORT) -> ThreadingHTT
                 self._send(HTTP_NOT_FOUND, {"error": "not found"})
                 return
             try:
-                length = int(self.headers.get("Content-Length") or 0)
+                try:
+                    length = int(self.headers.get("Content-Length") or 0)
+                except ValueError as exc:
+                    raise BadRequest("bad Content-Length") from exc
+                if length < 0:  # rfile.read(-1) would wait for the client to hang up
+                    raise BadRequest("bad Content-Length")
                 try:
                     payload = json.loads(self.rfile.read(length) or b"null")
                 except ValueError as exc:

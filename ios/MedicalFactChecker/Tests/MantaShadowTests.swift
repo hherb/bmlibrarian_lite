@@ -146,7 +146,7 @@ final class MantaShadowTests: XCTestCase {
 
     @MainActor
     private func shadow(_ stub: StubJudge, _ results: Results) -> MantaShadow {
-        MantaShadow(service: stub, onResult: { results.take($0) })
+        MantaShadow(service: stub, onResult: { results.take($0); return true })
     }
 
     @MainActor
@@ -406,7 +406,7 @@ final class MantaShadowTests: XCTestCase {
         XCTAssertEqual(calls, ["judge 111", "reference j-111"])
         let references = await stub.references
         XCTAssertEqual(references.map(\.llmScore), [4])
-        XCTAssertEqual(references.map(\.llmModel), [AppSettings.shared.llmModel])
+        XCTAssertEqual(references.map(\.llmModel), [workflow.session?.modelName ?? AppSettings.shared.llmModel])
         XCTAssertEqual(references.first?.indexing?.medlineStatus, "MEDLINE")
         XCTAssertEqual(documents[0].mantaOutcome, MantaOutcome.judged.rawValue)
         XCTAssertEqual(documents[0].mantaServerURL, "http://127.0.0.1:8765")
@@ -480,7 +480,28 @@ final class MantaShadowTests: XCTestCase {
         let references = calls.filter { $0.hasPrefix("reference") }
         XCTAssertEqual(calls.first?.hasPrefix("judge"), true, "control: the first paper was judged")
         XCTAssertEqual(references.count, 1, "the shadow stopped after the deleted session refused its first result")
+        XCTAssertEqual(calls.filter { $0.hasPrefix("judge") }.count, 1, "the next paper never reached the server")
         XCTAssertFalse(context.hasChanges, "nothing was written into the deleted session")
+    }
+
+    /// Clearing the MANTA URL mid-run stops the shadow at its next result: nothing stored, no next paper.
+    @MainActor
+    func testClearingTheURLStopsTheShadow() async throws {
+        let stub = StubJudge()
+        await stub.hold()
+        let (workflow, documents, _) = try scoringWorkflow(stub, titles: ["Good paper", "Good paper too"])
+
+        try await workflow.scoreNewDocuments(documents.map(\.pmid))
+        await stub.waitUntilHeld()
+        workflow.useMantaService(stub, serverURL: "")
+        await stub.release()
+        try await Task.sleep(for: .milliseconds(200))
+
+        let calls = await stub.calls
+        XCTAssertEqual(calls.first?.hasPrefix("judge"), true, "control: a paper was judged")
+        XCTAssertEqual(calls.filter { $0.hasPrefix("judge") }.count, 1, "the next paper never reached the server")
+        XCTAssertNil(documents[0].mantaOutcome)
+        XCTAssertNil(documents[1].mantaOutcome)
     }
 
     func testOnlyLocalhostMantaURLsAreAccepted() {
@@ -489,7 +510,9 @@ final class MantaShadowTests: XCTestCase {
         }
         // the server binds 127.0.0.1 only, so IPv6 loopback reaches nothing
         for url in ["https://example.org", "http://10.0.0.3:8765", "http://[::1]:8765", "localhost:8765",
-                    "ftp://localhost", ""] {
+                    "ftp://localhost", "", "http://evil.com\\@127.0.0.1:8765", "http://127.0.0.1@evil.com:8765",
+                    "http://localhost@evil.com", "http://localhost.evil.com", "http://127.0.0.1.nip.io",
+                    "http://evil.com/127.0.0.1", "http://evil.com?h=localhost", "http://evil.com#localhost"] {
             XCTAssertFalse(FactCheckWorkflow.isLoopbackMantaURL(url), url)
         }
     }
@@ -498,7 +521,8 @@ final class MantaShadowTests: XCTestCase {
         XCTAssertEqual(FactCheckWorkflow.normalizedMantaURL("127.0.0.1:8765"), "http://127.0.0.1:8765")
         XCTAssertEqual(FactCheckWorkflow.normalizedMantaURL(" localhost:8765 "), "http://localhost:8765")
         XCTAssertEqual(FactCheckWorkflow.normalizedMantaURL("https://localhost:1"), "https://localhost:1")
-        for url in ["10.0.0.3:8765", "example.org", "https://example.org", "ftp://localhost", "[::1]:8765", ""] {
+        for url in ["10.0.0.3:8765", "example.org", "https://example.org", "ftp://localhost", "[::1]:8765", "",
+                    "localhost@evil.com:80", "evil.com\\@localhost"] {
             XCTAssertNil(FactCheckWorkflow.normalizedMantaURL(url), url)
         }
     }
