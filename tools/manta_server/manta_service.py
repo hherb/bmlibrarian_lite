@@ -238,6 +238,7 @@ class MantaService:
                     judgement_id=jid,
                     app=app,
                     question=question,
+                    title=title,
                     ids=ids,
                     revision=self._revision,
                     relevance_probabilities=rel_probs,

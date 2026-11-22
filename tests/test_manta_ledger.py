@@ -32,6 +32,7 @@ JUDGEMENT = ml.Judgement(
     judgement_id="j1",
     app="desktop",
     question="Does ünïcode help?",
+    title="A ünïcode trial",
     ids={"pmid": "123", "doi": "10.1/x"},
     revision="rev1",
     relevance_probabilities={"1": 0.1, "2": 0.2, "3": 0.3, "4": 0.2, "5": 0.2},
@@ -113,3 +114,25 @@ def test_no_abstract_column(tmp_path: Path) -> None:
     cols = [r[1] for r in conn.execute("PRAGMA table_info(judgements)")]
     assert cols and not any("abstract" in c for c in cols)
     assert isinstance(conn, sqlite3.Connection)
+
+
+def test_older_ledger_gains_title_column(tmp_path: Path) -> None:
+    """A ledger made before the title column gets it, empty, on open."""
+    path = tmp_path / "old.db"
+    old_schema = ml.SCHEMA.replace("    title TEXT NOT NULL DEFAULT '',\n", "")
+    assert old_schema != ml.SCHEMA
+    conn = sqlite3.connect(path)
+    conn.executescript(old_schema)
+    conn.execute(
+        "INSERT INTO judgements (judgement_id, app, question, ids, revision,"
+        " relevance_probabilities, expected_score, verdict, cutoff, prompt_tokens, truncated,"
+        " seconds, created_at) VALUES ('old', 'mac', 'q', '{}', 'r', '{}', 2.0, 'in', 1.95,"
+        " 1, 0, 0.1, '2026-11-01T00:00:00+00:00')"
+    )
+    conn.commit()
+    conn.close()
+    conn = ml.open_ledger(path)
+    ((j, refs),) = ml.rows(conn)
+    assert (j.judgement_id, j.title, refs) == ("old", "", [])
+    ml.record_judgement(conn, JUDGEMENT)
+    assert ml.rows(conn)[1][0] == JUDGEMENT

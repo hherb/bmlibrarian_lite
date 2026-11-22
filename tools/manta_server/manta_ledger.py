@@ -16,7 +16,8 @@
 
 """SQLite ledger of MANTA judgements and the LLM reference verdicts posted back.
 
-Standard library only. The abstract is never stored, only what was decided.
+Standard library only. The abstract is never stored, only what was decided
+(and the paper's title, which the report lists).
 """
 
 from __future__ import annotations
@@ -32,6 +33,7 @@ CREATE TABLE IF NOT EXISTS judgements (
     judgement_id TEXT PRIMARY KEY,
     app TEXT NOT NULL,
     question TEXT NOT NULL,
+    title TEXT NOT NULL DEFAULT '',
     ids TEXT NOT NULL,
     revision TEXT NOT NULL,
     relevance_probabilities TEXT NOT NULL,
@@ -59,6 +61,38 @@ CREATE TABLE IF NOT EXISTS references_ (
     PRIMARY KEY (judgement_id, llm_model)
 );
 """
+_JUDGEMENT_COLUMNS = (
+    "judgement_id",
+    "app",
+    "question",
+    "title",
+    "ids",
+    "revision",
+    "relevance_probabilities",
+    "expected_score",
+    "verdict",
+    "cutoff",
+    "design",
+    "design_probability",
+    "design_probabilities",
+    "prompt_tokens",
+    "truncated",
+    "seconds",
+    "created_at",
+)
+_REFERENCE_COLUMNS = (
+    "judgement_id",
+    "app",
+    "llm_model",
+    "llm_score",
+    "llm_design",
+    "indexing",
+    "indexing_design",
+    "human_indexed",
+    "created_at",
+)
+# A ledger made before the title column was added gets it on open.
+_ADD_TITLE = "ALTER TABLE judgements ADD COLUMN title TEXT NOT NULL DEFAULT ''"
 
 
 @dataclass(frozen=True)
@@ -68,6 +102,7 @@ class Judgement:
     judgement_id: str
     app: str
     question: str
+    title: str
     ids: dict[str, str]
     revision: str
     relevance_probabilities: dict[str, float]
@@ -122,18 +157,29 @@ def open_ledger(path: Path) -> sqlite3.Connection:
     path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(path, check_same_thread=False)
     conn.executescript(SCHEMA)
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(judgements)")}
+    if "title" not in columns:
+        conn.execute(_ADD_TITLE)
     conn.commit()
     return conn
+
+
+def _insert(table: str, columns: tuple[str, ...]) -> str:
+    return (
+        f"INSERT OR REPLACE INTO {table} ({', '.join(columns)})"
+        f" VALUES ({', '.join('?' * len(columns))})"
+    )
 
 
 def record_judgement(conn: sqlite3.Connection, j: Judgement) -> None:
     """Store a judgement, replacing one with the same id."""
     conn.execute(
-        "INSERT OR REPLACE INTO judgements VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        _insert("judgements", _JUDGEMENT_COLUMNS),
         (
             j.judgement_id,
             j.app,
             j.question,
+            j.title,
             _dump(j.ids),
             j.revision,
             _dump(j.relevance_probabilities),
@@ -160,7 +206,7 @@ def record_reference(conn: sqlite3.Connection, r: Reference) -> bool:
     if known is None:
         return False
     conn.execute(
-        "INSERT OR REPLACE INTO references_ VALUES (?,?,?,?,?,?,?,?,?)",
+        _insert("references_", _REFERENCE_COLUMNS),
         (
             r.judgement_id,
             r.app,
@@ -180,27 +226,24 @@ def record_reference(conn: sqlite3.Connection, r: Reference) -> bool:
 def rows(conn: sqlite3.Connection) -> list[tuple[Judgement, list[Reference]]]:
     """Every judgement (oldest first) with its references."""
     out: list[tuple[Judgement, list[Reference]]] = []
-    for row in conn.execute("SELECT * FROM judgements ORDER BY created_at, rowid").fetchall():
-        j = Judgement(
-            *row[:3],
-            _load(row[3]),
-            row[4],
-            _load(row[5]),
-            *row[6:11],
-            _load(row[11]),
-            row[12],
-            bool(row[13]),
-            row[14],
-            row[15],
-        )
-        refs = [
-            Reference(*q[:5], _load(q[5]), q[6], _unflag(q[7]), q[8])
-            for q in conn.execute(
-                "SELECT judgement_id, app, llm_model, llm_score, llm_design, indexing,"
-                " indexing_design, human_indexed, created_at FROM references_"
-                " WHERE judgement_id = ? ORDER BY llm_model",
-                (j.judgement_id,),
-            )
-        ]
+    judgements = conn.execute(
+        f"SELECT {', '.join(_JUDGEMENT_COLUMNS)} FROM judgements ORDER BY created_at, rowid"
+    ).fetchall()
+    for values in judgements:
+        row = dict(zip(_JUDGEMENT_COLUMNS, values, strict=True))
+        for key in ("ids", "relevance_probabilities", "design_probabilities"):
+            row[key] = _load(row[key])
+        row["truncated"] = bool(row["truncated"])
+        j = Judgement(**row)
+        refs = []
+        for ref_values in conn.execute(
+            f"SELECT {', '.join(_REFERENCE_COLUMNS)} FROM references_"
+            " WHERE judgement_id = ? ORDER BY llm_model",
+            (j.judgement_id,),
+        ):
+            ref = dict(zip(_REFERENCE_COLUMNS, ref_values, strict=True))
+            ref["indexing"] = _load(ref["indexing"])
+            ref["human_indexed"] = _unflag(ref["human_indexed"])
+            refs.append(Reference(**ref))
         out.append((j, refs))
     return out

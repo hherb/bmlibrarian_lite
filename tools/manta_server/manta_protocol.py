@@ -31,8 +31,6 @@ from typing import Any
 SHADOW_CUTOFF: float = 1.95
 # The lowest app score that counts as relevant.
 RELEVANT_MIN_SCORE: int = 3
-# MANTA option ids "0".."4" become app levels "1".."5".
-APP_LEVEL_OFFSET: int = 1
 
 # The app's five relevance levels (agents/scoring_agent.py), lowest first.
 RELEVANCE_LEVELS = (
@@ -103,6 +101,7 @@ _MH_COHORT = "Cohort Studies"
 _MH_CASE_CONTROL = "Case-Control Studies"
 _MH_CROSS_SECTIONAL = "Cross-Sectional Studies"
 _HUMAN_INDEXING = frozenset({None, "Manual"})
+_MEDLINE = "MEDLINE"
 
 # Coarse groups: designs a reader would not tell apart from an abstract
 # without the indexer's convention (SR vs MA, which kind of cohort).
@@ -261,10 +260,10 @@ def app_scale(level_probabilities: Mapping[str, float]) -> dict[str, float]:
     Returns:
         App level (as text) to probability.
     """
-    return {str(int(option) + APP_LEVEL_OFFSET): p for option, p in level_probabilities.items()}
+    return {str(int(option) + SCORE_MIN): p for option, p in level_probabilities.items()}
 
 
-def human_indexed(medline_status: str | None, indexing_method: str | None) -> bool:
+def human_indexed(medline_status: str | None, indexing_method: str | None) -> bool | None:
     """Whether a PubMed record's indexing was done by a person.
 
     Args:
@@ -272,9 +271,14 @@ def human_indexed(medline_status: str | None, indexing_method: str | None) -> bo
         indexing_method: The record's indexing method, None when absent.
 
     Returns:
-        True for a MEDLINE record indexed manually (or with no method stated).
+        For a MEDLINE record, True when indexed manually (or with no method
+        stated) and False otherwise; None for any other record (no status,
+        ``"PubMed-not-MEDLINE"``, ``"In-Process"``, ...), whose indexing is
+        not known to be either.
     """
-    return medline_status == "MEDLINE" and indexing_method in _HUMAN_INDEXING
+    if medline_status != _MEDLINE:
+        return None
+    return indexing_method in _HUMAN_INDEXING
 
 
 def indexing_design(indexing: Mapping[str, Any] | None) -> tuple[str | None, bool | None]:

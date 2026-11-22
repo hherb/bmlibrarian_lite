@@ -88,8 +88,14 @@ def serve(args: argparse.Namespace) -> None:
 
 
 def make_selftest(args: argparse.Namespace) -> None:
-    """Writes each fixture case's reference value from this model, in place."""
+    """Writes each fixture case's reference value from this model, in place.
+
+    Refuses (exit 1, fixture untouched) when the fixture has no cases or the
+    model gives a non-finite reference, which would disable the self-test.
+    """
     cases = _load_cases()
+    if not cases:
+        sys.exit(f"refusing to write {SELFTEST_PATH}: it has no cases")
     predictor = mm.load_predictor(args.model.expanduser(), args.device)
     for i, case in enumerate(cases):
         if case["task"] == ms.TASK_RELEVANCE:
@@ -102,6 +108,8 @@ def make_selftest(args: argparse.Namespace) -> None:
             req = mp.design_request(f"selftest-{i}", case["title"], case["abstract"])
             case["answer"] = predictor.predict(req)["questions"][ms.Q_DESIGN]["answer"]
         logger.info("case %d: %s", i, case.get("expected_score", case.get("answer")))
+    if problem := mm.selftest_problem(cases):
+        sys.exit(f"refusing to write {SELFTEST_PATH}: {problem}")
     SELFTEST_PATH.write_text(
         json.dumps(cases, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
     )
@@ -112,7 +120,7 @@ def report(args: argparse.Namespace) -> None:
     paths = [p.expanduser() for p in args.ledgers] or [DEFAULT_LEDGER.expanduser()]
     try:
         rows = mr.load_rows(paths)
-    except FileNotFoundError as exc:
+    except (FileNotFoundError, ValueError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         sys.exit(1)
     print(mr.render(mr.relevance_report(rows), mr.design_report(rows)), end="")

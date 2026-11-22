@@ -20,10 +20,11 @@
 from __future__ import annotations
 
 import logging
+import math
 import sys
 from pathlib import Path
 
-from manta_service import Predictor
+from manta_service import TASK_DESIGN, TASK_RELEVANCE, Predictor
 
 logger = logging.getLogger(__name__)
 
@@ -87,12 +88,28 @@ def selftest_problem(cases: list[dict]) -> str | None:
         cases: The fixture's cases.
 
     Returns:
-        A message when it is empty or a case lacks its reference value, else None.
+        A message when it is empty, a case's task is unknown, or a case lacks a
+        usable reference (a finite ``expected_score``, a non-empty ``answer``);
+        else None.
     """
     if not cases:
         return "selftest.json has no cases"
     for i, case in enumerate(cases):
-        key = "expected_score" if case.get("task") == "relevance" else "answer"
-        if case.get(key) is None:
-            return f"selftest.json case {i} has no {key}"
+        task = case.get("task")
+        if task == TASK_RELEVANCE:
+            score = case.get("expected_score")
+            # a NaN reference passes every comparison, so it would disable the test
+            finite = (
+                isinstance(score, (int, float))
+                and not isinstance(score, bool)
+                and math.isfinite(score)
+            )
+            if not finite:
+                return f"selftest.json case {i} has no finite expected_score (got {score!r})"
+        elif task == TASK_DESIGN:
+            answer = case.get("answer")
+            if not isinstance(answer, str) or not answer:
+                return f"selftest.json case {i} has no answer (got {answer!r})"
+        else:
+            return f"selftest.json case {i} has an unknown task {task!r}"
     return None

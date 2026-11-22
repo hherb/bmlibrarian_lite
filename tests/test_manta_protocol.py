@@ -40,11 +40,26 @@ def test_app_scale_shifts_levels() -> None:
 
 
 def test_human_indexed() -> None:
-    """Only MEDLINE with manual or no method counts."""
-    assert manta_protocol.human_indexed("MEDLINE", None)
-    assert manta_protocol.human_indexed("MEDLINE", "Manual")
-    assert not manta_protocol.human_indexed("MEDLINE", "Automated")
-    assert not manta_protocol.human_indexed("PubMed-not-MEDLINE", None)
+    """MEDLINE records are human or not; a record not in MEDLINE is unknown (None)."""
+    assert manta_protocol.human_indexed("MEDLINE", None) is True
+    assert manta_protocol.human_indexed("MEDLINE", "Manual") is True
+    assert manta_protocol.human_indexed("MEDLINE", "Automated") is False
+    assert manta_protocol.human_indexed("MEDLINE", "Curated") is False
+    assert manta_protocol.human_indexed(None, None) is None
+    assert manta_protocol.human_indexed(None, "Manual") is None
+    assert manta_protocol.human_indexed("PubMed-not-MEDLINE", None) is None
+    assert manta_protocol.human_indexed("In-Process", None) is None
+
+
+def test_no_status_indexing_is_unknown() -> None:
+    """A record with no MEDLINE status gives its design with human_indexed None."""
+    got = manta_protocol.indexing_design({"publication_types": ["Randomized Controlled Trial"]})
+    assert got == ("rct", None)
+
+
+def test_app_level_offset_is_score_min() -> None:
+    """The duplicate offset constant is gone; app_scale shifts by SCORE_MIN."""
+    assert not hasattr(manta_protocol, "APP_LEVEL_OFFSET")
 
 
 def test_indexing_design() -> None:

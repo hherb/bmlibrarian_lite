@@ -23,8 +23,7 @@ A judgement with several LLM references (different models) is counted once per
 
 from __future__ import annotations
 
-import importlib.util
-import sys
+import sqlite3
 from collections import Counter
 from collections.abc import Sequence
 from pathlib import Path
@@ -32,40 +31,33 @@ from typing import Any
 
 import manta_ledger as ml
 import manta_protocol as mp
+import manta_stats as stats
 
 SWEEP_CUTOFFS = (1.5, 1.75, 1.95, 2.0, 2.25, 2.5, 3.0)
 CALIBRATION_BINS = 10
-_BENCHMARK = Path(__file__).resolve().parents[2] / "scripts" / "manta_benchmark.py"
 
 Row = tuple[ml.Judgement, list[ml.Reference]]
-
-
-def _load_benchmark() -> Any:
-    spec = importlib.util.spec_from_file_location("manta_benchmark", _BENCHMARK)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module  # dataclasses look the module up by name
-    spec.loader.exec_module(module)
-    return module
-
-
-_bench = _load_benchmark()
 
 
 def load_rows(paths: Sequence[Path]) -> list[Row]:
     """Merge the ledgers at paths, de-duplicated on judgement_id (first wins).
 
+    Each ledger is opened read-only: the report never writes into a file.
+
     Raises:
         FileNotFoundError: A ledger file does not exist (it is never created).
+        ValueError: A file is not a MANTA ledger.
     """
     seen: dict[str, Row] = {}
     for path in paths:
         if not path.exists():
             raise FileNotFoundError(f"no ledger at {path}")
-        conn = ml.open_ledger(path)
+        conn = sqlite3.connect(f"{path.resolve().as_uri()}?mode=ro", uri=True)
         try:
             for j, refs in ml.rows(conn):
                 seen.setdefault(j.judgement_id, (j, refs))
+        except sqlite3.DatabaseError as exc:
+            raise ValueError(f"{path} is not a MANTA ledger ({exc})") from exc
         finally:
             conn.close()
     return list(seen.values())
@@ -74,6 +66,7 @@ def load_rows(paths: Sequence[Path]) -> list[Row]:
 def _entry(j: ml.Judgement, r: ml.Reference) -> dict[str, Any]:
     return {
         "question": j.question,
+        "title": j.title,
         "ids": j.ids,
         "expected_score": j.expected_score,
         "llm_score": r.llm_score,
@@ -110,7 +103,7 @@ def relevance_report(rows: Sequence[Row]) -> dict[str, Any]:
         }
         for c in SWEEP_CUTOFFS
     ]
-    out["spearman"] = _bench.spearman(
+    out["spearman"] = stats.spearman(
         [j.expected_score for j, _ in pairs], [float(r.llm_score) for _, r in pairs]
     )
     out["judged_without_reference"] = no_ref
@@ -129,7 +122,7 @@ def _design_part(pairs: Sequence[tuple[ml.Judgement, str]]) -> dict[str, Any]:
     """Agreement, confusion (reference -> MANTA -> count) and calibration of one group."""
     pairs = [(j, ref) for j, ref in pairs if j.design is not None]
     hits = [j.design == ref for j, ref in pairs]
-    interval = _bench.wilson_interval(sum(hits), len(hits))
+    interval = stats.wilson_interval(sum(hits), len(hits))
     confusion: dict[str, dict[str, int]] = {}
     for j, ref in pairs:
         row = confusion.setdefault(ref, {})
@@ -154,7 +147,7 @@ def _design_part(pairs: Sequence[tuple[ml.Judgement, str]]) -> dict[str, Any]:
         },
         "confusion": confusion,
         "calibration_bins": bins,
-        "ece": _bench.expected_calibration_error(probs, hits),
+        "ece": stats.expected_calibration_error(probs, hits),
     }
 
 
@@ -210,10 +203,11 @@ def render(relevance: dict[str, Any], design: dict[str, Any]) -> str:
         f"  in but LLM-low: {len(relevance['in_but_low'])}",
         "  Spearman (expected vs LLM score): " + ("n/a" if sp is None else f"{sp:.3f}"),
         "",
-        "Wrongly out (question | ids | expected | LLM score | model | app):",
+        "Wrongly out (question | title | ids | expected | LLM score | model | app):",
     ]
     lines += [
-        f"  {e['question']} | {e['ids']} | {e['expected_score']:.2f} | {e['llm_score']} "
+        f"  {e['question']} | {e['title']} | {e['ids']} | {e['expected_score']:.2f} "
+        f"| {e['llm_score']} "
         f"| {e['llm_model']} | {e['app']}"
         for e in relevance["wrongly_out"]
     ] or ["  none"]

@@ -42,17 +42,38 @@ curl -s 127.0.0.1:8765/health
 
 At start-up it loads the model, runs the four-case self-test from `selftest.json` and logs the result and whether
 the flash-linear-attention kernel is in use. If the self-test fails the server stays up but answers 503 to
-`/v1/judge`. It refuses to start at all when `selftest.json` is missing, empty or lacks a reference value.
+`/v1/judge`. It refuses to start at all when `selftest.json` is missing, empty, or lacks a usable reference (a
+finite `expected_score`, a non-empty `answer`).
 
 `python manta_server.py make-selftest --device cpu` rewrites each case's reference (`expected_score` or `answer`)
-from this model. Only run it when the cases change; the committed references came from a CPU run (about 37 s per
-item on an M3 Max).
+from this model. Only run it when the cases change; the committed references in `selftest.json` were produced on
+CPU at MANTA's default bf16 (about 37 s per item on an M3 Max). It refuses, leaving the file untouched, when the
+fixture has no cases or the model gives a non-finite reference.
 
 The server binds to 127.0.0.1 only. To reach the DGX from the Mac:
 
 ```bash
 ssh -N -L 8765:127.0.0.1:8765 dgx
 ```
+
+## Report
+
+```bash
+python manta_server.py report [LEDGER ...]
+```
+
+Prints the comparison of MANTA's judgements with the LLM references the apps posted back: the papers MANTA would
+have screened out wrongly (question, title, ids, scores, model, app), the cut-off sweep, and design agreement
+against the LLM and against PubMed's human, automated and unknown indexing. With no argument it reads
+`~/.manta_server/ledger.db`; several ledgers (say the Mac's and the DGX's) are merged. Ledgers are opened
+read-only; a file that is not a ledger is an error (exit 1).
+
+## Turning it on in the apps
+
+Both apps accept a localhost URL only (`127.0.0.1` or `localhost`); any other host is refused. Empty means off.
+
+- **Desktop:** in `~/.bmlibrarian_lite/config.json` set `"manta": {"url": "http://127.0.0.1:8765"}`.
+- **Mac:** Settings → LLM → MANTA server URL, for example `http://127.0.0.1:8765`.
 
 ## Hardware results (self-test, 2026-11-22)
 
@@ -65,5 +86,5 @@ Both passed the four-case self-test within the 0.05 tolerance.
 
 ## Licences
 
-MANTA-4B is Apache 2.0 (`LICENSE` in the model directory). It is built on Qwen3.5-4B, whose licence is in
-`LICENSE_base_model` there. Keep both with any copy of the weights.
+MANTA-4B is Apache 2.0 (`LICENSE` in the model directory). It is built on Qwen3.5-4B, which is also Apache 2.0
+(`LICENSE_base_model` there, copyright 2026 Alibaba Cloud). Keep both with any copy of the weights.
