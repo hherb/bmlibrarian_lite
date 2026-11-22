@@ -53,10 +53,7 @@ final class FactCheckWorkflow {
 
     // MARK: - State
 
-    private(set) var session: FactCheckSession? {
-        // a shadow judging another session's papers must not write into this one's
-        didSet { if session?.id != oldValue?.id { cancelMantaShadow() } }
-    }
+    private(set) var session: FactCheckSession?
     private(set) var isRunning = false
     private(set) var progressMessage = ""
 
@@ -201,9 +198,10 @@ final class FactCheckWorkflow {
     /// This run's retraction screen so far.
     private var retractionRun = RetractionRun(generation: 0)
 
-    /// The MANTA shadow judging the session's scored papers, with the session and
-    /// server it was made for; `nil` when none is running.
-    private var mantaShadow: (token: UUID, sessionID: UUID, serverURL: String, shadow: MantaShadow)?
+    /// The MANTA shadows by the session whose scored papers they judge, with the server
+    /// each was made for. A finished run's shadow keeps draining after another session
+    /// opens; its results go into its own session (``applyManta(_:token:sessionID:serverURL:)``).
+    private var mantaShadows: [UUID: (token: UUID, serverURL: String, shadow: MantaShadow)] = [:]
 
     /// The MANTA service and server URL tests inject (``useMantaService(_:serverURL:)``);
     /// `nil` uses a ``MantaService`` at the settings' URL.
@@ -1247,7 +1245,7 @@ final class FactCheckWorkflow {
         guard isRunning else { return nil }
 
         isCancelling = true
-        cancelMantaShadow()
+        if let session { cancelMantaShadow(of: session.id) }
         // Cooperative cancellation. The task is kept, not cleared: it has not
         // ended yet, and the next work waits for it.
         workflowTask?.cancel()
@@ -1490,18 +1488,20 @@ final class FactCheckWorkflow {
         Task { await shadow.observe(item) }
     }
 
-    /// The session's running shadow, or a new one when the session or the URL
-    /// changed; `nil` when the URL is empty or not a localhost one.
+    /// The session's running shadow, or a new one when it has none or the URL changed;
+    /// `nil` when the URL is empty or not a localhost one. A URL change stops every
+    /// shadow made for another URL.
     private func mantaShadow(for session: FactCheckSession) -> MantaShadow? {
-        let serverURL = mantaOverride?.serverURL ?? settings.mantaURL.trimmingCharacters(in: .whitespacesAndNewlines)
-        if let current = mantaShadow, current.sessionID == session.id, current.serverURL == serverURL {
-            return current.shadow
+        let raw = mantaOverride?.serverURL ?? settings.mantaURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        let serverURL = Self.normalizedMantaURL(raw)
+        for (id, entry) in mantaShadows where entry.serverURL != serverURL {
+            cancelMantaShadow(of: id)
         }
-        cancelMantaShadow()
-        guard !serverURL.isEmpty else { return nil }
-        guard Self.isLoopbackMantaURL(serverURL), let url = URL(string: serverURL) else {
-            if mantaRefusedURL != serverURL {
-                mantaRefusedURL = serverURL
+        if let current = mantaShadows[session.id] { return current.shadow }
+        guard !raw.isEmpty else { return nil }
+        guard let serverURL, let url = URL(string: serverURL) else {
+            if mantaRefusedURL != raw {
+                mantaRefusedURL = raw
                 logger.info("MANTA is off: its URL is not a localhost one")
             }
             return nil
@@ -1509,18 +1509,21 @@ final class FactCheckWorkflow {
         let token = UUID()
         let sessionID = session.id
         let shadow = MantaShadow(service: mantaOverride?.service ?? MantaService(baseURL: url)) { [weak self] result in
-            self?.applyManta(result, token: token, serverURL: serverURL)
+            self?.applyManta(result, token: token, sessionID: sessionID, serverURL: serverURL)
         }
-        mantaShadow = (token, sessionID, serverURL, shadow)
+        mantaShadows[sessionID] = (token, serverURL, shadow)
         return shadow
     }
 
-    /// Stores a shadow result on its document, unless its shadow was cancelled or replaced.
-    private func applyManta(_ result: MantaShadowResult, token: UUID, serverURL: String) {
-        guard mantaShadow?.token == token, let session else { return }
-        // a session deleted from History or Settings leaves `session` pointing at a dead model
-        guard !session.isDeleted, session.modelContext != nil else {
-            cancelMantaShadow()
+    /// Stores a shadow result on its document in the shadow's own session, unless that
+    /// shadow was cancelled or replaced. A deleted session takes nothing and stops its shadow.
+    private func applyManta(_ result: MantaShadowResult, token: UUID, sessionID: UUID, serverURL: String) {
+        guard mantaShadows[sessionID]?.token == token else { return }
+        let descriptor = FetchDescriptor<FactCheckSession>(predicate: #Predicate { $0.id == sessionID })
+        // a session deleted from History or Settings may still be fetched before the delete is saved
+        guard let session = try? modelContext.fetch(descriptor).first,
+              !session.isDeleted, session.modelContext != nil else {
+            cancelMantaShadow(of: sessionID)
             return
         }
         guard let document = (session.documents ?? []).first(where: { $0.pmid == result.pmid }),
@@ -1529,10 +1532,9 @@ final class FactCheckWorkflow {
         try? modelContext.save()
     }
 
-    /// Stops the running shadow: its pending papers are dropped and nothing more is stored.
-    private func cancelMantaShadow() {
-        guard let shadow = mantaShadow?.shadow else { return }
-        mantaShadow = nil
+    /// Stops a session's shadow: its pending papers are dropped and nothing more is stored.
+    private func cancelMantaShadow(of sessionID: UUID) {
+        guard let shadow = mantaShadows.removeValue(forKey: sessionID)?.shadow else { return }
         Task { await shadow.cancel() }
     }
 
@@ -1542,7 +1544,15 @@ final class FactCheckWorkflow {
         guard let components = URLComponents(string: urlString),
               let scheme = components.scheme?.lowercased(), scheme == "http" || scheme == "https",
               let host = components.host?.lowercased() else { return false }
-        return WorkflowConstants.mantaLoopbackHosts.contains(host.trimmingCharacters(in: CharacterSet(charactersIn: "[]")))
+        return WorkflowConstants.mantaLoopbackHosts.contains(host)
+    }
+
+    /// The MANTA URL to use for `raw`: trimmed, with `http://` put in front when it names
+    /// no scheme (`127.0.0.1:8765`); `nil` when that is not a localhost URL.
+    nonisolated static func normalizedMantaURL(_ raw: String) -> String? {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        let url = trimmed.contains("://") ? trimmed : "http://" + trimmed
+        return isLoopbackMantaURL(url) ? url : nil
     }
 
     /// The paper's identifiers MANTA's ledger records, the present ones only.

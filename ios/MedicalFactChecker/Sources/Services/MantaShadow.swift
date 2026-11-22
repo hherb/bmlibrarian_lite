@@ -40,6 +40,13 @@ struct MantaShadowItem: Sendable {
     let indexing: MantaIndexing?
 }
 
+/// The value ``Document/mantaOutcome`` stores for each ``MantaShadowResult/Outcome``.
+enum MantaOutcome: String, Sendable {
+    case judged
+    case unreachable
+    case failed
+}
+
 /// What MANTA made of one paper, for ``Document/applyManta(_:serverURL:)``.
 struct MantaShadowResult: Sendable {
     enum Outcome: Sendable {
@@ -58,6 +65,7 @@ struct MantaShadowResult: Sendable {
 /// Judges each observed paper with MANTA, one at a time in order, off the scoring path.
 ///
 /// The shadow never changes the fact check: its results go only to `onResult`.
+/// ``cancel()`` is terminal: a cancelled shadow judges and delivers nothing more.
 actor MantaShadow {
     /// The app name the server's ledger records.
     static let app = "macos"
@@ -69,43 +77,43 @@ actor MantaShadow {
     private let onResult: @MainActor @Sendable (MantaShadowResult) -> Void
     private var pending: [MantaShadowItem] = []
     private var worker: Task<Void, Never>?
-    /// Bumped by ``cancel()``; a worker from an earlier generation delivers nothing.
-    private var generation = 0
+    /// Set by ``cancel()``, never cleared: no request after a Stop, no stray result.
+    private var cancelled = false
 
     init(service: MantaJudging, onResult: @escaping @MainActor @Sendable (MantaShadowResult) -> Void) {
         self.service = service
         self.onResult = onResult
     }
 
-    /// Queue a paper; it is judged after every paper observed before it.
+    /// Queue a paper; it is judged after every paper observed before it. Does nothing once cancelled.
     func observe(_ item: MantaShadowItem) {
+        guard !cancelled else { return }
         pending.append(item)
         if worker == nil {
-            let current = generation
-            worker = Task { await self.drain(generation: current) }
+            worker = Task { await self.drain() }
         }
     }
 
-    /// Drop every pending paper. One in flight delivers nothing: `MantaService` reports a
-    /// cancelled request as unreachable, which a stopped run must not store.
+    /// Drop every pending paper and refuse any later one. One in flight delivers nothing:
+    /// `MantaService` reports a cancelled request as unreachable, which a stopped run must not store.
     func cancel() {
+        cancelled = true
         pending.removeAll()
-        generation += 1
         worker?.cancel()
         worker = nil
     }
 
-    private func drain(generation current: Int) async {
-        while current == generation, !pending.isEmpty {
+    private func drain() async {
+        while !cancelled, !pending.isEmpty {
             let item = pending.removeFirst()
-            guard let result = await run(item, generation: current), current == generation else { return }
+            guard let result = await run(item), !cancelled else { return }
             await onResult(result)
         }
-        if current == generation { worker = nil }
+        worker = nil
     }
 
     /// Judge, then post the reference (skipped when cancelled meanwhile).
-    private func run(_ item: MantaShadowItem, generation current: Int) async -> MantaShadowResult? {
+    private func run(_ item: MantaShadowItem) async -> MantaShadowResult? {
         let request = MantaJudgeRequest(
             app: Self.app, question: item.claim, title: item.title, abstract: item.abstract,
             ids: item.ids, tasks: Self.tasks)
@@ -116,7 +124,7 @@ actor MantaShadow {
             return MantaShadowResult(
                 pmid: item.pmid, outcome: Self.outcome(for: error), judgedAt: Date(), referencePosted: false)
         }
-        guard current == generation else { return nil }
+        guard !cancelled else { return nil }
         let judgedAt = Date()
         let reference = MantaReference(
             judgementID: judgement.judgementID, app: Self.app, llmModel: item.llmModel,

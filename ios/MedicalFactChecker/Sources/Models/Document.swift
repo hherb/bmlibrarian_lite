@@ -503,7 +503,7 @@ final class Document {
     // benchmark). Every field optional, so no schema version is needed; `nil`
     // throughout means never judged.
 
-    /// `"judged"`, `"unreachable"` or `"failed"`.
+    /// A ``MantaOutcome`` raw value: `"judged"`, `"unreachable"` or `"failed"`.
     var mantaOutcome: String?
 
     /// The server's id for the judgement, which the posted reference names.
@@ -563,15 +563,15 @@ final class Document {
         let judgement: MantaJudgement?
         switch result.outcome {
         case .judged(let judged):
-            mantaOutcome = "judged"
+            mantaOutcome = MantaOutcome.judged.rawValue
             mantaError = nil
             judgement = judged
         case .unreachable(let message):
-            mantaOutcome = "unreachable"
+            mantaOutcome = MantaOutcome.unreachable.rawValue
             mantaError = String(message.prefix(WorkflowConstants.mantaErrorMaxLength))
             judgement = nil
         case .failed(let message):
-            mantaOutcome = "failed"
+            mantaOutcome = MantaOutcome.failed.rawValue
             mantaError = String(message.prefix(WorkflowConstants.mantaErrorMaxLength))
             judgement = nil
         }

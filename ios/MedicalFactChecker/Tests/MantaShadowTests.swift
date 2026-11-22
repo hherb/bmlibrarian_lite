@@ -99,13 +99,16 @@ private func item(_ pmid: String, score: Int = 4) -> MantaShadowItem {
             indexingMethod: "Manual"))
 }
 
-/// Scores the paper titled "Good paper" 4 and refuses any other with a 400, so the real scoring loop runs offline.
+/// Scores the paper titled "Good paper" 4, never answers for "Slow paper" (the run stays under way
+/// until stopped), and refuses any other with a 400, so the real scoring loop runs offline.
 private final class ScoringStubProtocol: URLProtocol {
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
 
     override func startLoading() {
-        let good = Self.body(of: request).range(of: Data("Good paper".utf8)) != nil
+        let body = Self.body(of: request)
+        if body.range(of: Data("Slow paper".utf8)) != nil { return }
+        let good = body.range(of: Data("Good paper".utf8)) != nil
         let content = #"{"score": 4, "explanation": "on topic"}"#
         let payload = try! JSONSerialization.data(withJSONObject: good
             ? ["choices": [["message": ["role": "assistant", "content": content], "finish_reason": "stop"]]]
@@ -225,7 +228,7 @@ final class MantaShadowTests: XCTestCase {
     }
 
     @MainActor
-    func testCancelDropsPending() async {
+    func testCancelDropsPending() async throws {
         let stub = StubJudge()
         await stub.hold()
         let results = Results()
@@ -236,21 +239,32 @@ final class MantaShadowTests: XCTestCase {
         await stub.waitUntilHeld()
         await shadow.cancel()
         await stub.release()
-
-        // A later item still runs, so its result proves the dropped ones never arrive.
-        let done = expectation(description: "the later item")
-        results.expectation = done
-        await shadow.observe(item("3"))
-        await fulfillment(of: [done], timeout: 5)
+        try await Task.sleep(for: .milliseconds(100))
 
         let calls = await stub.calls
-        XCTAssertFalse(calls.contains("judge 2"), "a pending item is dropped")
-        XCTAssertEqual(results.all.map(\.pmid), ["3"], "the in-flight item delivers nothing")
+        XCTAssertEqual(calls, ["judge 1"], "a pending item is dropped; the in-flight one posts no reference")
+        XCTAssertTrue(results.all.isEmpty, "the in-flight item delivers nothing")
+    }
+
+    /// Cancel is terminal: a paper observed after a Stop is never sent.
+    @MainActor
+    func testObserveAfterCancelDoesNothing() async throws {
+        let stub = StubJudge()
+        let results = Results()
+        let shadow = shadow(stub, results)
+
+        await shadow.cancel()
+        await shadow.observe(item("1"))
+        try await Task.sleep(for: .milliseconds(100))
+
+        let calls = await stub.calls
+        XCTAssertEqual(calls, [], "no request after a Stop")
+        XCTAssertTrue(results.all.isEmpty)
     }
 
     /// `MantaService` reports a cancelled request as unreachable; a stopped run must not store that.
     @MainActor
-    func testCancelledInFlightUnreachableIsNotDelivered() async {
+    func testCancelledInFlightUnreachableIsNotDelivered() async throws {
         let stub = StubJudge()
         await stub.hold()
         await stub.failJudge(with: MantaServiceError.unreachable("cancelled"))
@@ -261,14 +275,9 @@ final class MantaShadowTests: XCTestCase {
         await stub.waitUntilHeld()
         await shadow.cancel()
         await stub.release()
+        try await Task.sleep(for: .milliseconds(100))
 
-        await stub.failJudge(with: MantaServiceError.unreachable("down"))
-        let done = expectation(description: "the later item")
-        results.expectation = done
-        await shadow.observe(item("2"))
-        await fulfillment(of: [done], timeout: 5)
-
-        XCTAssertEqual(results.all.map(\.pmid), ["2"])
+        XCTAssertTrue(results.all.isEmpty)
     }
 
     func testApplyMantaJudged() throws {
@@ -278,7 +287,7 @@ final class MantaShadowTests: XCTestCase {
             MantaShadowResult(pmid: "1", outcome: .judged(judgement("J")), judgedAt: at, referencePosted: true),
             serverURL: "http://127.0.0.1:8765")
 
-        XCTAssertEqual(document.mantaOutcome, "judged")
+        XCTAssertEqual(document.mantaOutcome, MantaOutcome.judged.rawValue)
         XCTAssertEqual(document.mantaJudgementID, "J")
         XCTAssertEqual(document.mantaServerURL, "http://127.0.0.1:8765")
         XCTAssertEqual(document.mantaRevision, "r1")
@@ -311,7 +320,7 @@ final class MantaShadowTests: XCTestCase {
             MantaShadowResult(pmid: "1", outcome: .unreachable(long), judgedAt: Date(), referencePosted: false),
             serverURL: "u")
 
-        XCTAssertEqual(document.mantaOutcome, "unreachable")
+        XCTAssertEqual(document.mantaOutcome, MantaOutcome.unreachable.rawValue)
         XCTAssertEqual(document.mantaError?.count, WorkflowConstants.mantaErrorMaxLength)
         XCTAssertNil(document.mantaJudgementID)
         XCTAssertNil(document.mantaExpectedScore)
@@ -399,14 +408,15 @@ final class MantaShadowTests: XCTestCase {
         XCTAssertEqual(references.map(\.llmScore), [4])
         XCTAssertEqual(references.map(\.llmModel), [AppSettings.shared.llmModel])
         XCTAssertEqual(references.first?.indexing?.medlineStatus, "MEDLINE")
-        XCTAssertEqual(documents[0].mantaOutcome, "judged")
+        XCTAssertEqual(documents[0].mantaOutcome, MantaOutcome.judged.rawValue)
         XCTAssertEqual(documents[0].mantaServerURL, "http://127.0.0.1:8765")
         XCTAssertNil(documents[1].mantaOutcome)
     }
 
-    /// A shadow's result arriving after the workflow moved to another session is not stored.
+    /// A finished run's pending judgement still lands on its own session's paper after the
+    /// workflow moved to another session.
     @MainActor
-    func testAnotherSessionDropsTheShadow() async throws {
+    func testAnotherSessionKeepsTheShadow() async throws {
         let stub = StubJudge()
         await stub.hold()
         let (workflow, documents, container) = try scoringWorkflow(stub)
@@ -416,13 +426,38 @@ final class MantaShadowTests: XCTestCase {
         let other = FactCheckSession(claim: "Another claim")
         ModelContext(container).insert(other)
         workflow.restoreForViewing(other)
+        XCTAssertTrue(workflow.session === other, "control: the workflow shows the other session")
         await stub.release()
-        try await Task.sleep(for: .milliseconds(100))
+        for _ in 0..<200 where documents[0].mantaOutcome == nil {
+            try await Task.sleep(for: .milliseconds(10))
+        }
 
-        XCTAssertEqual(documents[0].relevanceScore, 4, "control: the paper was scored")
         let calls = await stub.calls
-        XCTAssertEqual(calls, ["judge 111"], "the cancelled shadow posts no reference")
-        XCTAssertNil(documents[0].mantaOutcome)
+        XCTAssertEqual(calls, ["judge 111", "reference j-111"])
+        XCTAssertEqual(documents[0].mantaOutcome, MantaOutcome.judged.rawValue)
+        XCTAssertEqual(documents[0].mantaJudgementID, "j-111")
+    }
+
+    /// The user's Stop cancels the shadow: the paper in flight stores nothing and posts no reference.
+    @MainActor
+    func testStopCancelsTheShadow() async throws {
+        let stub = StubJudge()
+        await stub.hold()
+        let (workflow, documents, _) = try scoringWorkflow(stub, titles: ["Good paper", "Slow paper"])
+
+        // the retry runs as the workflow's task; "Slow paper" keeps it under way until the stop
+        let run = Task { await workflow.retryFailedDocuments(pmids: documents.map(\.pmid)) }
+        await stub.waitUntilHeld()
+        XCTAssertTrue(workflow.isRunning, "control: the run is under way at the stop")
+        workflow.cancelFactCheck()
+        await stub.release()
+        await run.value
+        try await Task.sleep(for: .milliseconds(200))
+
+        XCTAssertEqual(documents[0].relevanceScore, 4, "control: the paper was scored and judged")
+        let calls = await stub.calls
+        XCTAssertEqual(calls, ["judge 111"], "the stopped shadow posts no reference")
+        XCTAssertNil(documents[0].mantaOutcome, "nothing stored after the stop")
     }
 
     /// A session deleted behind the workflow's back (History, Settings) takes no result, and its shadow stops.
@@ -449,11 +484,22 @@ final class MantaShadowTests: XCTestCase {
     }
 
     func testOnlyLocalhostMantaURLsAreAccepted() {
-        for url in ["http://127.0.0.1:8765", "http://localhost:8765", "http://[::1]:8765", "HTTPS://LocalHost"] {
+        for url in ["http://127.0.0.1:8765", "http://localhost:8765", "HTTPS://LocalHost"] {
             XCTAssertTrue(FactCheckWorkflow.isLoopbackMantaURL(url), url)
         }
-        for url in ["https://example.org", "http://10.0.0.3:8765", "localhost:8765", "ftp://localhost", ""] {
+        // the server binds 127.0.0.1 only, so IPv6 loopback reaches nothing
+        for url in ["https://example.org", "http://10.0.0.3:8765", "http://[::1]:8765", "localhost:8765",
+                    "ftp://localhost", ""] {
             XCTAssertFalse(FactCheckWorkflow.isLoopbackMantaURL(url), url)
+        }
+    }
+
+    func testAMantaURLWithoutASchemeGetsHTTP() {
+        XCTAssertEqual(FactCheckWorkflow.normalizedMantaURL("127.0.0.1:8765"), "http://127.0.0.1:8765")
+        XCTAssertEqual(FactCheckWorkflow.normalizedMantaURL(" localhost:8765 "), "http://localhost:8765")
+        XCTAssertEqual(FactCheckWorkflow.normalizedMantaURL("https://localhost:1"), "https://localhost:1")
+        for url in ["10.0.0.3:8765", "example.org", "https://example.org", "ftp://localhost", "[::1]:8765", ""] {
+            XCTAssertNil(FactCheckWorkflow.normalizedMantaURL(url), url)
         }
     }
 }
