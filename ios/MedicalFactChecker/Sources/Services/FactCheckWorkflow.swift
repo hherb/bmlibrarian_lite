@@ -2566,7 +2566,7 @@ final class FactCheckWorkflow {
         let (response, usage) = try await llmService.chat(
             messages: messages,
             temperature: 0.1,
-            maxTokens: 512,
+            maxTokens: WorkflowConstants.shortAnswerMaxTokens,
             jsonMode: true
         )
 
@@ -3085,7 +3085,7 @@ final class FactCheckWorkflow {
         let (response, usage) = try await llmService.chat(
             messages: messages,
             temperature: 0.7,
-            maxTokens: 512
+            maxTokens: WorkflowConstants.generationMaxTokens
         )
 
         // Record usage for budget tracking
@@ -3787,7 +3787,7 @@ final class FactCheckWorkflow {
                 (response, usage) = try await llmService.chat(
                     messages: messages,
                     temperature: 0.3,
-                    maxTokens: 1024,
+                    maxTokens: WorkflowConstants.generationMaxTokens,
                     jsonMode: true
                 )
             } catch where stopRequested {

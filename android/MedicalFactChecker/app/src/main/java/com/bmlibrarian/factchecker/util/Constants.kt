@@ -492,17 +492,45 @@ object Constants {
     /** Default temperature for LLM requests (0.0 = deterministic). */
     const val LLM_DEFAULT_TEMPERATURE = 0.0f
 
-    /** Maximum tokens for scoring responses. */
-    const val LLM_SCORING_MAX_TOKENS = 500
+    // The output limits leave room for thinking, which counts against them:
+    // Claude Haiku 5.5 thinks by default. Measured on Claude Haiku 5.5 and
+    // Sonnet 5.5 with the app's prompts (#813); the longest answer is given for
+    // each. Only the tokens generated are billed, so the headroom costs nothing.
+    // They match iOS's limits for the same calls.
 
-    /** Maximum tokens for citation extraction responses. */
-    const val LLM_CITATION_MAX_TOKENS = 1000
+    /** Maximum tokens for scoring responses (longest measured: 405). */
+    const val LLM_SCORING_MAX_TOKENS = 2048
 
-    /** Maximum tokens for report generation responses. */
-    const val LLM_REPORT_MAX_TOKENS = 2000
+    /** Maximum tokens for citation extraction responses (longest measured: 601). */
+    const val LLM_CITATION_MAX_TOKENS = 4096
 
-    /** Maximum tokens for query conversion responses. Matches iOS value for cross-platform consistency. */
-    const val LLM_QUERY_MAX_TOKENS = 512
+    /** Maximum tokens for report generation responses (longest measured: 1,814). */
+    const val LLM_REPORT_MAX_TOKENS = 8192
+
+    /** Maximum tokens for query conversion responses (longest measured: 226). */
+    const val LLM_QUERY_MAX_TOKENS = 2048
+
+    /** Maximum tokens for alternative search queries (longest measured: 1,509). */
+    const val LLM_ALTERNATIVE_QUERIES_MAX_TOKENS = 4096
+
+    /** Maximum tokens for a HyDE abstract (longest measured: 1,834). */
+    const val LLM_HYDE_MAX_TOKENS = 4096
+
+    // Output tokens recorded for each call: usage is estimated, not read from
+    // the reply (#818), so these keep the figures recorded before the limits
+    // were raised.
+
+    /** Output tokens recorded for a query conversion or an alternative-queries call. */
+    const val LLM_QUERY_OUTPUT_ESTIMATE = 256
+
+    /** Output tokens recorded for a scoring call or a HyDE abstract. */
+    const val LLM_SCORING_OUTPUT_ESTIMATE = 250
+
+    /** Output tokens recorded for one citation extraction window. */
+    const val LLM_CITATION_OUTPUT_ESTIMATE = 500
+
+    /** Output tokens recorded for a report. */
+    const val LLM_REPORT_OUTPUT_ESTIMATE = 2000
 
     /**
      * How many more times smart search asks the model for alternative queries
@@ -512,9 +540,6 @@ object Constants {
 
     /** Estimated characters per token for token count estimation. */
     const val TOKEN_ESTIMATE_CHARS_PER_TOKEN = 4
-
-    /** Divisor for estimating output tokens (output typically half of max). */
-    const val OUTPUT_TOKEN_ESTIMATE_DIVISOR = 2
 
     /** Estimated available documents from Europe PMC when cursor exists. */
     const val EUROPE_PMC_AVAILABLE_ESTIMATE = 100

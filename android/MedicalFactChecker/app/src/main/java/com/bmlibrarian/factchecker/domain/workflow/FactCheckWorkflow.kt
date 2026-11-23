@@ -1434,7 +1434,7 @@ class FactCheckWorkflow @Inject constructor(
         recordUsage(
             operation = "query_conversion",
             inputTokens = estimateTokens(claim),
-            outputTokens = Constants.LLM_QUERY_MAX_TOKENS / Constants.OUTPUT_TOKEN_ESTIMATE_DIVISOR
+            outputTokens = Constants.LLM_QUERY_OUTPUT_ESTIMATE
         )
 
         // Store structured query for provider-specific translation
@@ -1611,7 +1611,7 @@ class FactCheckWorkflow @Inject constructor(
                 recordUsage(
                     operation = "hyde_generation",
                     inputTokens = estimateTokens(claim),
-                    outputTokens = Constants.LLM_SCORING_MAX_TOKENS / Constants.OUTPUT_TOKEN_ESTIMATE_DIVISOR
+                    outputTokens = Constants.LLM_SCORING_OUTPUT_ESTIMATE
                 )
 
                 hydeAbstract
@@ -2066,7 +2066,7 @@ class FactCheckWorkflow @Inject constructor(
         recordUsage(
             operation = "report",
             inputTokens = estimateTokens(claim + citationData.joinToString { it.passage }),
-            outputTokens = Constants.LLM_REPORT_MAX_TOKENS
+            outputTokens = Constants.LLM_REPORT_OUTPUT_ESTIMATE
         )
 
         // Build references section
@@ -2527,7 +2527,7 @@ class FactCheckWorkflow @Inject constructor(
             recordUsage(
                 operation = "smart_search_query_generation",
                 inputTokens = estimateTokens(session.claimText),
-                outputTokens = Constants.LLM_QUERY_MAX_TOKENS / Constants.OUTPUT_TOKEN_ESTIMATE_DIVISOR
+                outputTokens = Constants.LLM_QUERY_OUTPUT_ESTIMATE
             )
             if (queries.isNotEmpty()) return Result.success(queries)
             Log.w(TAG, "Smart search's answer ${attempt + 1} of $attempts held no usable query")

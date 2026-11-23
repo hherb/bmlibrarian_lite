@@ -158,18 +158,19 @@ a git pin). Snapshot rows keep `run_status`/`run_deciding` set-once.
   `README.md`): with `manta.url` (desktop) or *Settings → LLM → MANTA* (macOS,
   localhost URLs only) set, MANTA judges every LLM-scored paper in the
   background, stored per paper (`manta_judgements`, `Document.manta*`).
-- **MANTA benchmark** (PR #812, Claude columns in this session's PR;
-  `doc/developer/manta_benchmark/README.md`). Study design: MANTA-4B 89 %,
-  the app's Haiku 5.5 classifier 84 %, bmlib's rules 39 %; MANTA is
-  calibrated, Haiku is overconfident. Relevance: MANTA-4B ranks as well as
-  the Sonnet 5.5 scorer (ρ 0.617 / 0.619). MANTA-27B is not run (≈ 60 GB
-  GPU). Whether to adopt MANTA is the maintainer's call. **Thinking counts
-  against `max_tokens`**: Haiku 5.5 thinks by default (empty thinking
-  blocks), so the desktop's short-answer caps are `SHORT_ANSWER_MAX_TOKENS`
-  (2048; 256 lost a third of classifications). The apps' 512 caps: **#813**.
-- **Every search query a fact check ran** (apps, PR #810): `SearchQueryLog`
-  on both apps, Android Room 11 → 12. Not yet seen running on a device or
-  simulator.
+- **MANTA benchmark** (PRs #812, #814; `doc/developer/manta_benchmark/README.md`).
+  Design: MANTA-4B 89 %, the Haiku 5.5 classifier 84 %, bmlib's rules 39 %
+  (MANTA calibrated, Haiku overconfident). Relevance: MANTA-4B ranks as well
+  as the Sonnet 5.5 scorer (ρ 0.617 / 0.619). Adopting MANTA is the
+  maintainer's call. **Thinking counts against `max_tokens`**: Haiku 5.5
+  thinks by default, on Anthropic's OpenAI-compatible endpoint (iOS) too.
+  Desktop: `SHORT_ANSWER_MAX_TOKENS` (2048). **Apps (#813, measured):** 2048
+  for a score or query, 4096 for alternative queries, HyDE and citations
+  (alternative queries outgrew 1024 even without thinking), 8192 for a
+  report. Android's recorded usage is estimated (**#818**); Haiku refuses
+  some HyDE prompts (**#819**).
+- **Every search query a fact check ran** (apps, PR #810): `SearchQueryLog`,
+  Android Room 11 → 12; not yet seen on a device or simulator.
 - **Strict service JSON** (#781, #784): every service's JSON but esearch is
   read strictly (desktop `search_failures.strict_response_json`, **a test
   double scripts `.content`, never `.json()`**; Android `strictJsonElement`).
@@ -249,7 +250,11 @@ Open issues by family; each issue carries the detail. None blocks another.
 
 - **MANTA shadow report** (maintainer): run real fact checks with the server
   up, then `python tools/manta_server/manta_server.py report`. The screening
-  stage (spec §5) gets its own spec revision after that report.
+  stage (spec §5) gets its own spec revision after that report. The shadow
+  stage's parked follow-ups (untested paths, an unbounded queue, the wire
+  contract fixture): **#815**.
+- **Android's real LLM usage (#818)** and **HyDE refusals (#819)**, from the
+  #813 measurement.
 - **From the bmlib syncs.** PR #757's issues are fixed and unreleased (a
   0.6.1 is the maintainer's call; PRs #765–#767, #771, #774, #775). Still
   deferred: #768, #769 (apps' Ollama), #770 (prompts ask for null), #773

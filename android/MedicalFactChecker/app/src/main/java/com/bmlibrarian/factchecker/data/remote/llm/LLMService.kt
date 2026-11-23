@@ -105,7 +105,7 @@ class LLMService @Inject constructor(
      * translated to provider-specific syntax by the caller.
      *
      * Mirrors the iOS FactCheckWorkflow.convertClaimToQuery() for cross-platform
-     * consistency, including matching maxTokens (512) and temperature (0.1).
+     * consistency, including matching maxTokens and temperature (0.1).
      *
      * @param provider The LLM provider configuration
      * @param apiKey The API key for authentication
@@ -205,7 +205,7 @@ class LLMService @Inject constructor(
             model = model,
             systemPrompt = "You are a medical librarian expert at generating alternative search strategies for biomedical literature databases.",
             userPrompt = userPrompt,
-            maxTokens = 1024,
+            maxTokens = Constants.LLM_ALTERNATIVE_QUERIES_MAX_TOKENS,
             temperature = 0.3
         )
         // An answer with no content reached the model as surely as one that does not parse
@@ -480,7 +480,7 @@ class LLMService @Inject constructor(
             model = model,
             systemPrompt = systemPrompt,
             userPrompt = "Generate a hypothetical abstract for: $claim",
-            maxTokens = Constants.LLM_CITATION_MAX_TOKENS
+            maxTokens = Constants.LLM_HYDE_MAX_TOKENS
         ).map { it.content.trim() }
     }
 

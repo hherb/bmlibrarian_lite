@@ -48,20 +48,21 @@ class ConstantsTest {
     }
 
     @Test
-    fun `OUTPUT_TOKEN_ESTIMATE_DIVISOR is positive`() {
-        assertTrue(
-            "Output token divisor must be positive",
-            Constants.OUTPUT_TOKEN_ESTIMATE_DIVISOR > 0
+    fun `output estimates are positive and within their limits`() {
+        // Usage is recorded from these, so an estimate above its call's limit
+        // would record more than the call could have generated
+        val pairs = listOf(
+            Constants.LLM_QUERY_OUTPUT_ESTIMATE to Constants.LLM_QUERY_MAX_TOKENS,
+            Constants.LLM_QUERY_OUTPUT_ESTIMATE to Constants.LLM_ALTERNATIVE_QUERIES_MAX_TOKENS,
+            Constants.LLM_SCORING_OUTPUT_ESTIMATE to Constants.LLM_SCORING_MAX_TOKENS,
+            Constants.LLM_SCORING_OUTPUT_ESTIMATE to Constants.LLM_HYDE_MAX_TOKENS,
+            Constants.LLM_CITATION_OUTPUT_ESTIMATE to Constants.LLM_CITATION_MAX_TOKENS,
+            Constants.LLM_REPORT_OUTPUT_ESTIMATE to Constants.LLM_REPORT_MAX_TOKENS
         )
-    }
-
-    @Test
-    fun `OUTPUT_TOKEN_ESTIMATE_DIVISOR produces reasonable estimates`() {
-        // Divisor of 2 means output is estimated at half of max tokens
-        assertTrue(
-            "Output token divisor should be between 1 and 4",
-            Constants.OUTPUT_TOKEN_ESTIMATE_DIVISOR in 1..4
-        )
+        for ((estimate, limit) in pairs) {
+            assertTrue("estimate $estimate must be positive", estimate > 0)
+            assertTrue("estimate $estimate must not exceed limit $limit", estimate <= limit)
+        }
     }
 
     // ==================== Europe PMC Constants ====================
@@ -121,8 +122,8 @@ class ConstantsTest {
 
     @Test
     fun `LLM max tokens have sensible hierarchy`() {
-        // Query (512, matches iOS) and scoring are the small-budget tasks;
-        // citation and report need more room.
+        // Query and scoring are the short answers; citation and report need
+        // more room.
         assertTrue(
             "Query tokens should not exceed citation tokens",
             Constants.LLM_QUERY_MAX_TOKENS <= Constants.LLM_CITATION_MAX_TOKENS

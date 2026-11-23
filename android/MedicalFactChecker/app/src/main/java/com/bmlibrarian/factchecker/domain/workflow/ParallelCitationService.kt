@@ -176,7 +176,7 @@ class ParallelCitationService @Inject constructor(
         var cost = 0.0
         for ((index, window) in windows.withIndex()) {
             val estimatedInput = ParallelScoringService.estimateTokens(claim + input.title + window)
-            val estimatedOutput = Constants.LLM_CITATION_MAX_TOKENS / Constants.OUTPUT_TOKEN_ESTIMATE_DIVISOR
+            val estimatedOutput = Constants.LLM_CITATION_OUTPUT_ESTIMATE
             inputTokens += estimatedInput
             outputTokens += estimatedOutput
             cost += modelInfo?.calculateCost(estimatedInput, estimatedOutput) ?: 0.0
