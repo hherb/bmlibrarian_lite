@@ -133,7 +133,7 @@ def test_search_service_conversions_carry_publication_types() -> None:
     pm = SimpleNamespace(
         pmid="1", pmc_id=None, doi=None, title="T", abstract="A", authors=[],
         publication="J", publication_date="2020-01-01", mesh_terms=[], url=None,
-        publication_types=types,
+        publication_types=types, medline_status="MEDLINE", indexing_method=None,
     )
     ep = SimpleNamespace(
         pmid="1", pmcid=None, doi=None, title="T", abstract="A", authors=[],

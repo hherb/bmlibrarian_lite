@@ -13,6 +13,17 @@ apps additionally carry their own store version tags (`swift_*`, `appstore_*`).
 
 ### Added
 
+- **MANTA shadow stage (desktop and macOS, with a stand-alone server).** A
+  local MANTA-4B server (`tools/manta_server/`: localhost HTTP, a ledger, a
+  comparison report) can judge papers beside the LLM. When `manta.url` is set
+  on the desktop, or *Settings → LLM → MANTA server URL* in the macOS app,
+  every paper the LLM scores is also sent to the server in the background;
+  MANTA's judgement, or why there was none, is stored per paper (desktop
+  `manta_judgements`, the app's `Document`) and the LLM's score is posted
+  back as the reference, with the paper's PubMed indexing. Nothing the reader
+  sees changes, and scoring never waits for or fails because of MANTA. Both
+  apps accept a localhost URL only (`127.0.0.1` or `localhost`). Off by
+  default.
 - **Apps: every search query a fact check ran is shown, with what each
   found.** The iOS/macOS and Android apps showed only the first query the
   claim was converted to. Smart search's alternative queries, and the initial

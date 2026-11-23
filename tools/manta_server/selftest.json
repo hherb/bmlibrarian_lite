@@ -1,0 +1,28 @@
+[
+  {
+    "task": "relevance",
+    "question": "Does vitamin D supplementation reduce the risk of falls in older adults living in care homes?",
+    "title": "Vitamin D supplementation and falls among nursing home residents: a randomised trial",
+    "abstract": "Background: Falls are a leading cause of injury in older adults living in care homes, and low vitamin D status may weaken muscles and balance. Methods: We randomised 640 residents aged 70 years or older across 18 care homes to daily cholecalciferol 1000 IU or matching placebo for 12 months. The primary outcome was the number of residents who fell at least once, recorded from incident reports. Results: Falls occurred in 41% of the vitamin D group and 52% of the placebo group (relative risk 0.79, 95% confidence interval 0.66 to 0.94). Hip fractures were rare and did not differ. Hypercalcaemia was uncommon in both groups. Conclusions: Daily vitamin D supplementation reduced falls among care home residents.",
+    "expected_score": 4.791883255762514
+  },
+  {
+    "task": "relevance",
+    "question": "Does vitamin D supplementation reduce the risk of falls in older adults living in care homes?",
+    "title": "Tidal turbine blade fatigue under variable flow conditions",
+    "abstract": "Background: Marine current turbines operate in turbulent flow, and blade fatigue limits their service life. Methods: We built a finite element model of a 12 metre composite blade and applied measured flow records from a tidal channel over simulated periods of ten years. Strain was computed at the blade root and mid-span, and damage was accumulated with a linear rule. Results: Peak strain at the root exceeded the design allowance during rare high-turbulence events, and modelled life fell by 18% compared with steady-flow assumptions. Conclusions: Turbulence records should be included when sizing the root joint of tidal turbine blades. No clinical outcomes were studied.",
+    "expected_score": 1.0141269393498078
+  },
+  {
+    "task": "design",
+    "title": "Intravenous iron versus oral iron for anaemia in pregnancy: a randomised controlled trial",
+    "abstract": "Background: Iron deficiency anaemia in pregnancy is common, and oral iron is poorly tolerated. Methods: In this multicentre trial, 480 pregnant women with haemoglobin below 100 g/L between 24 and 32 weeks were randomly assigned by computer-generated sequence to a single infusion of ferric carboxymaltose or to ferrous sulphate tablets taken daily. Allocation was concealed and laboratory staff were blinded. The primary outcome was haemoglobin at 36 weeks. Results: Mean haemoglobin was 8.4 g/L higher in the infusion group (95% confidence interval 6.1 to 10.7). Gastrointestinal side effects were more frequent with tablets. Conclusions: Intravenous iron raised haemoglobin more than oral iron.",
+    "answer": "rct"
+  },
+  {
+    "task": "design",
+    "title": "Pesticide exposure and childhood leukaemia: a case-control study",
+    "abstract": "Background: The causes of childhood leukaemia are largely unknown. Methods: We identified 310 children with leukaemia from a regional cancer registry and selected 620 control children from birth records, matched by age, sex and region. Parents completed a structured interview about household pesticide use during pregnancy and early childhood. Odds ratios were estimated with conditional logistic regression, adjusted for parental education and smoking. Results: Frequent indoor pesticide use during pregnancy was reported more often by case mothers than control mothers (adjusted odds ratio 1.6, 95% confidence interval 1.2 to 2.2). Conclusions: Household pesticide use was associated with childhood leukaemia; recall bias cannot be excluded.",
+    "answer": "case_control"
+  }
+]

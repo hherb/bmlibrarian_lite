@@ -918,6 +918,12 @@ class PubMedSearchClient:
                     if e.text and e.text.strip()
                 ]
 
+            citation = article_elem.find("MedlineCitation")
+            medline_status = citation.get("Status") if citation is not None else None
+            indexing_method = (
+                citation.get("IndexingMethod") if citation is not None else None
+            )
+
             return ArticleMetadata(
                 pmid=pmid,
                 doi=doi,
@@ -930,6 +936,8 @@ class PubMedSearchClient:
                 keywords=keywords,
                 pmc_id=pmc_id,
                 publication_types=publication_types,
+                medline_status=medline_status,
+                indexing_method=indexing_method,
             )
 
         except Exception as e:

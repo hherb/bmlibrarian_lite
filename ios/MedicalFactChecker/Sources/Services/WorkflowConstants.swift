@@ -47,6 +47,16 @@ enum WorkflowConstants {
     /// long enough to be skipped reports nothing at all.
     static let maxFailedTitlesToName = 3
 
+    // MARK: - MANTA Shadow
+
+    /// Most characters of a MANTA error kept on a document, as the desktop's
+    /// `MANTA_ERROR_MAX_CHARS`: an error page must not fill the store.
+    static let mantaErrorMaxLength = 500
+
+    /// The hosts a MANTA URL may name (lowercase): the server binds 127.0.0.1
+    /// only, so papers never go to another machine.
+    static let mantaLoopbackHosts: Set<String> = ["127.0.0.1", "localhost"]
+
     // MARK: - Automatic Full-Text Retrieval
 
     /// Default lowest relevance score (1-5) whose papers are fetched in full

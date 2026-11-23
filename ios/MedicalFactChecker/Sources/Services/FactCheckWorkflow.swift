@@ -198,6 +198,18 @@ final class FactCheckWorkflow {
     /// This run's retraction screen so far.
     private var retractionRun = RetractionRun(generation: 0)
 
+    /// The MANTA shadows by the session whose scored papers they judge, with the server
+    /// each was made for. A finished run's shadow keeps draining after another session
+    /// opens; its results go into its own session (``applyManta(_:token:sessionID:serverURL:)``).
+    private var mantaShadows: [UUID: (token: UUID, serverURL: String, shadow: MantaShadow)] = [:]
+
+    /// The MANTA service and server URL tests inject (``useMantaService(_:serverURL:)``);
+    /// `nil` uses a ``MantaService`` at the settings' URL.
+    private var mantaOverride: (service: MantaJudging, serverURL: String)?
+
+    /// The last MANTA URL refused for not being localhost, so the refusal is logged once.
+    private var mantaRefusedURL: String?
+
     /// What a stop left undone beside a report that stands, for the screen to
     /// show.
     ///
@@ -1233,6 +1245,7 @@ final class FactCheckWorkflow {
         guard isRunning else { return nil }
 
         isCancelling = true
+        if let session { cancelMantaShadow(of: session.id) }
         // Cooperative cancellation. The task is kept, not cleared: it has not
         // ended yet, and the next work waits for it.
         workflowTask?.cancel()
@@ -1443,6 +1456,139 @@ final class FactCheckWorkflow {
     ///   unchecked for the run, but those their own label retracts.
     func useRetractionCheck(_ check: @escaping RetractionCheck) {
         retractionCheck = check
+    }
+
+    /// Gives the workflow its MANTA service and server URL, in place of a
+    /// ``MantaService`` at the settings' URL, for tests.
+    ///
+    /// - Parameters:
+    ///   - service: Judges the scored papers.
+    ///   - serverURL: The server recorded on each judged document.
+    func useMantaService(_ service: MantaJudging, serverURL: String) {
+        mantaOverride = (service, serverURL)
+    }
+
+    // MARK: - MANTA Shadow
+
+    /// Hands a successfully scored paper to the MANTA shadow, off the scoring path.
+    ///
+    /// Does nothing when no MANTA URL is set. What MANTA makes of the paper is
+    /// stored on the document only; the fact check never reads it.
+    ///
+    /// - Parameters:
+    ///   - document: The scored paper.
+    ///   - score: The LLM's score.
+    ///   - session: The session it was scored in.
+    private func observeForManta(_ document: Document, score: Int, in session: FactCheckSession) {
+        guard let shadow = mantaShadow(for: session) else { return }
+        let item = MantaShadowItem(
+            pmid: document.pmid, claim: session.claim, title: document.title, abstract: document.abstract,
+            ids: Self.mantaIDs(of: document), llmScore: score, llmModel: session.modelName ?? settings.llmModel,
+            indexing: Self.mantaIndexing(of: document))
+        Task { await shadow.observe(item) }
+    }
+
+    /// The session's running shadow, or a new one when it has none or the URL changed;
+    /// `nil` when the URL is empty or not a localhost one. A URL change stops every
+    /// shadow made for another URL.
+    private func mantaShadow(for session: FactCheckSession) -> MantaShadow? {
+        let raw = rawMantaURL
+        let serverURL = Self.normalizedMantaURL(raw)
+        for (id, entry) in mantaShadows where entry.serverURL != serverURL {
+            cancelMantaShadow(of: id)
+        }
+        if let current = mantaShadows[session.id] { return current.shadow }
+        guard !raw.isEmpty else { return nil }
+        guard let serverURL, let url = URL(string: serverURL) else {
+            if mantaRefusedURL != raw {
+                mantaRefusedURL = raw
+                logger.info("MANTA is off: its URL is not a localhost one")
+            }
+            return nil
+        }
+        let token = UUID()
+        let sessionID = session.id
+        let shadow = MantaShadow(service: mantaOverride?.service ?? MantaService(baseURL: url)) { [weak self] result in
+            self?.applyManta(result, token: token, sessionID: sessionID, serverURL: serverURL) ?? false
+        }
+        mantaShadows[sessionID] = (token, serverURL, shadow)
+        return shadow
+    }
+
+    /// The MANTA URL as set (the test override first), trimmed; empty means off.
+    private var rawMantaURL: String {
+        mantaOverride?.serverURL ?? settings.mantaURL.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Stores a shadow result on its document in the shadow's own session, unless that
+    /// shadow was cancelled or replaced. A deleted session, or a MANTA URL changed or cleared
+    /// since, takes nothing and stops its shadow.
+    ///
+    /// - Returns: Whether the shadow should go on to its next paper.
+    private func applyManta(_ result: MantaShadowResult, token: UUID, sessionID: UUID, serverURL: String) -> Bool {
+        guard mantaShadows[sessionID]?.token == token else { return false }
+        guard Self.normalizedMantaURL(rawMantaURL) == serverURL else {
+            cancelMantaShadow(of: sessionID)
+            return false
+        }
+        let descriptor = FetchDescriptor<FactCheckSession>(predicate: #Predicate { $0.id == sessionID })
+        let found: FactCheckSession?
+        do {
+            found = try modelContext.fetch(descriptor).first
+        } catch {
+            logger.warning("MANTA result not stored: \(error.localizedDescription, privacy: .public)")
+            return true
+        }
+        // a session deleted from History or Settings may still be fetched before the delete is saved
+        guard let session = found, !session.isDeleted, session.modelContext != nil else {
+            cancelMantaShadow(of: sessionID)
+            return false
+        }
+        guard let document = (session.documents ?? []).first(where: { $0.pmid == result.pmid }),
+              !document.isDeleted else { return true }
+        document.applyManta(result, serverURL: serverURL)
+        try? modelContext.save()
+        return true
+    }
+
+    /// Stops a session's shadow: its pending papers are dropped and nothing more is stored.
+    private func cancelMantaShadow(of sessionID: UUID) {
+        guard let shadow = mantaShadows.removeValue(forKey: sessionID)?.shadow else { return }
+        Task { await shadow.cancel() }
+    }
+
+    /// Whether `urlString` names a MANTA server on this machine: http or https to a
+    /// host in ``WorkflowConstants/mantaLoopbackHosts``, with no userinfo or backslash
+    /// (parsers disagree on where such a URL's host is).
+    nonisolated static func isLoopbackMantaURL(_ urlString: String) -> Bool {
+        guard !urlString.contains("\\"), let components = URLComponents(string: urlString),
+              components.user == nil, components.password == nil,
+              let scheme = components.scheme?.lowercased(), scheme == "http" || scheme == "https",
+              let host = components.host?.lowercased() else { return false }
+        return WorkflowConstants.mantaLoopbackHosts.contains(host)
+    }
+
+    /// The MANTA URL to use for `raw`: trimmed, with `http://` put in front when it names
+    /// no scheme (`127.0.0.1:8765`); `nil` when that is not a localhost URL.
+    nonisolated static func normalizedMantaURL(_ raw: String) -> String? {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        let url = trimmed.contains("://") ? trimmed : "http://" + trimmed
+        return isLoopbackMantaURL(url) ? url : nil
+    }
+
+    /// The paper's identifiers MANTA's ledger records, the present ones only.
+    static func mantaIDs(of document: Document) -> [String: String] {
+        let pmcID = document.pmcId?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let ids = ["pmid": document.pubmedID, "doi": document.usableDOI, "pmc_id": pmcID]
+        return ids.compactMapValues { $0?.isEmpty == false ? $0 : nil }
+    }
+
+    /// The paper's PubMed indexing, as the desktop sends it; `nil` for a paper with no PubMed ID.
+    static func mantaIndexing(of document: Document) -> MantaIndexing? {
+        guard document.pubmedID != nil else { return nil }
+        return MantaIndexing(
+            publicationTypes: document.publicationTypes ?? [], meshTerms: document.meshTerms,
+            medlineStatus: document.medlineStatus, indexingMethod: document.indexingMethod)
     }
 
     // MARK: - Phase 4 Error Handling
@@ -2835,6 +2981,7 @@ final class FactCheckWorkflow {
             if score >= settings.minScoreThreshold {
                 session.relevantDocumentsFound += 1
             }
+            observeForManta(document, score: score, in: session)
         } else {
             // Scoring failed (network error or parse failure)
             document.scoreParseFailed = true
@@ -4020,6 +4167,7 @@ final class FactCheckWorkflow {
                 if score >= settings.minScoreThreshold {
                     session.relevantDocumentsFound += 1
                 }
+                observeForManta(document, score: score, in: session)
             } else {
                 document.scoreParseFailed = true
                 document.scoreExplanation = result.rationale ?? result.errorMessage

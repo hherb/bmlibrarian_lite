@@ -115,6 +115,7 @@
 		8A22079973159C1DAFC38361 /* LibraryController.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4EAF503118784E1C6D368C8 /* LibraryController.swift */; };
 		5A00000000000000000000B2 /* StudyAnalyzerSender.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A00000000000000000000F2 /* StudyAnalyzerSender.swift */; };
 		AA20BA03F3578738656E720B /* ProgressReporting.swift in Sources */ = {isa = PBXBuildFile; fileRef = FD93FAA95F3B79411DE7C6FB /* ProgressReporting.swift */; };
+		4D7A2C9E1B3F5A8D6E0C2B71 /* MantaShadow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9E3B5D1A7C2F4E6B8A0D3C95 /* MantaShadow.swift */; };
 		7072386304FC7509A187D115 /* RetractionRun.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10E12E24BBF84A227E6409E7 /* RetractionRun.swift */; };
 		AC7F5F9D117D0C62AB84424D /* MacUtilities.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1B1A551C72E0132CF2D53022 /* MacUtilities.swift */; };
 		AF795A30DE8C130B1F39446D /* CheckpointedScoringService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A209B35A85EFF3CFCE9C2141 /* CheckpointedScoringService.swift */; };
@@ -254,6 +255,7 @@
 		F111ED9AA6EE0B4437331914 /* MacSearchOptionsToolbar.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MacSearchOptionsToolbar.swift; sourceTree = "<group>"; };
 		F3414FA46C1181D7951C1166 /* MacHistoryView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MacHistoryView.swift; sourceTree = "<group>"; };
 		FD93FAA95F3B79411DE7C6FB /* ProgressReporting.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ProgressReporting.swift; sourceTree = "<group>"; };
+		9E3B5D1A7C2F4E6B8A0D3C95 /* MantaShadow.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MantaShadow.swift; sourceTree = "<group>"; };
 		10E12E24BBF84A227E6409E7 /* RetractionRun.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RetractionRun.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -365,6 +367,7 @@
 				A1000063000 /* ErrorPersistenceManager.swift */,
 				A1000010000 /* FactCheckWorkflow.swift */,
 				A1000011000 /* LLMService.swift */,
+				9E3B5D1A7C2F4E6B8A0D3C95 /* MantaShadow.swift */,
 				A1000028000 /* ModelFetchService.swift */,
 				A1000066000 /* ParallelCitationService.swift */,
 				A1000059000 /* ParallelScoringService.swift */,
@@ -745,6 +748,7 @@
 				E95FAF1CAD3EA8FF31BDD1CB /* HistoryConstants.swift in Sources */,
 				63B5FF64C127DE738D15D95A /* ProcessingCheckpoint.swift in Sources */,
 				C66F3BFC5B474797CD4D732C /* CheckpointManager.swift in Sources */,
+				4D7A2C9E1B3F5A8D6E0C2B71 /* MantaShadow.swift in Sources */,
 				AA20BA03F3578738656E720B /* ProgressReporting.swift in Sources */,
 				7072386304FC7509A187D115 /* RetractionRun.swift in Sources */,
 				AF795A30DE8C130B1F39446D /* CheckpointedScoringService.swift in Sources */,

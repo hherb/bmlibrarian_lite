@@ -125,6 +125,18 @@ public struct SearchArticle: Sendable, Identifiable, Equatable {
     /// merged duplicate's are folded in (`SearchResultMerger`).
     public var publicationTypes: [String]?
 
+    /// The MeSH descriptor names PubMed indexed the record with (qualifiers
+    /// are not terms). `nil` means no list was recorded; `[]` means it listed none.
+    public var meshTerms: [String]?
+
+    /// PubMed's `MedlineCitation` `Status` (`MEDLINE`, `In-Process`, ...);
+    /// `nil` when not recorded.
+    public var medlineStatus: String?
+
+    /// PubMed's `MedlineCitation` `IndexingMethod` (`Automated`, `Manual`,
+    /// `Curated`); `nil` when not recorded (often absent).
+    public var indexingMethod: String?
+
     public init(
         pmid: String,
         pmcId: String? = nil,
@@ -141,7 +153,10 @@ public struct SearchArticle: Sendable, Identifiable, Equatable {
         pdfRenderURL: String? = nil,
         identifierKind: ArticleIdentifierKind? = nil,
         europePMCRecordID: String? = nil,
-        publicationTypes: [String]? = nil
+        publicationTypes: [String]? = nil,
+        meshTerms: [String]? = nil,
+        medlineStatus: String? = nil,
+        indexingMethod: String? = nil
     ) {
         self.id = pmid
         self.pmid = pmid
@@ -160,6 +175,9 @@ public struct SearchArticle: Sendable, Identifiable, Equatable {
         self.identifierKind = identifierKind
         self.europePMCRecordID = europePMCRecordID
         self.publicationTypes = publicationTypes
+        self.meshTerms = meshTerms
+        self.medlineStatus = medlineStatus
+        self.indexingMethod = indexingMethod
     }
 }
 

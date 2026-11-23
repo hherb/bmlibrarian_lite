@@ -49,6 +49,7 @@ import sqlite_vec
 
 from . import (
     citation_reads_store,
+    manta_store,
     rescue_queue_store,
     retraction_store,
     smart_search_store,
@@ -204,7 +205,8 @@ def compute_question_hash(question: str) -> str:
 # An upsert never erases a stored fact: NULL, '' and '[]' (JSON lists) mean
 # "not supplied" and keep the stored value; a non-empty value overwrites, so
 # corrections land. publication_types is the exception: '[]' there is a
-# recorded fact, distinct from NULL. created_at and the rowid (which keys the
+# recorded fact, distinct from NULL. indexing_method follows medline_status: a
+# record's status replaces the stored pair, its NULL method included. created_at and the rowid (which keys the
 # vector in vec_documents) are never touched.
 _KEEP_TEXT = "COALESCE(NULLIF(excluded.{c}, ''), documents.{c})"
 _KEEP_LIST = (
@@ -215,13 +217,18 @@ UPSERT_DOCUMENT_SQL = (
     """
     INSERT INTO documents
     (id, title, abstract, authors, year, journal, doi, pmid,
-     pmc_id, url, mesh_terms, source, publication_types)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     pmc_id, url, mesh_terms, source, publication_types,
+     medline_status, indexing_method)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
     """
     + ", ".join(
         [f"{c} = {_KEEP_TEXT.format(c=c)}" for c in (
-            "title", "abstract", "journal", "doi", "pmid", "pmc_id", "url", "source")]
+            "title", "abstract", "journal", "doi", "pmid", "pmc_id", "url", "source",
+            "medline_status")]
+        # a status brings its own method: a MEDLINE record with none was indexed by hand
+        + ["indexing_method = CASE WHEN NULLIF(excluded.medline_status, '') IS NULL "
+           "THEN documents.indexing_method ELSE excluded.indexing_method END"]
         + [f"{c} = {_KEEP_LIST.format(c=c)}" for c in ("authors", "mesh_terms")]
         + ["year = COALESCE(excluded.year, documents.year)",
            "publication_types = COALESCE(excluded.publication_types, documents.publication_types)"]
@@ -279,6 +286,8 @@ class LiteStorage:
                 conn.executescript(uploaded_full_texts_store.SCHEMA)
                 # The alternative queries smart search has run per question
                 conn.executescript(smart_search_store.SCHEMA)
+                # What the MANTA shadow stage found per paper
+                conn.executescript(manta_store.SCHEMA)
                 # Create sqlite-vec virtual tables for document and chunk embeddings
                 conn.execute(
                     f"""
@@ -300,6 +309,7 @@ class LiteStorage:
             self._migrate_scored_documents_constraint()
             self._migrate_transparency_results()
             self._migrate_document_publication_types()
+            self._migrate_document_indexing()
             self._sweep_orphaned_document_vectors()
             with self._sqlite_connection() as conn:
                 self._sweep_orphan_chunk_vectors(conn)
@@ -753,6 +763,26 @@ class LiteStorage:
                 f"Could not add documents.publication_types: {e}"
             ) from e
 
+    def _migrate_document_indexing(self) -> None:
+        """Give older databases the columns PubMed's indexing status lives in.
+
+        Raises:
+            SQLiteError: If a column cannot be added.
+        """
+        try:
+            with self._sqlite_connection() as conn:
+                columns = {
+                    row["name"]
+                    for row in conn.execute("PRAGMA table_info(documents)")
+                }
+                for column in ("medline_status", "indexing_method"):
+                    if column not in columns:
+                        conn.execute(f"ALTER TABLE documents ADD COLUMN {column} TEXT")
+                        logger.info("Added %s to documents.", column)
+                conn.commit()
+        except sqlite3.Error as e:
+            raise SQLiteError(f"Could not add documents indexing columns: {e}") from e
+
     def _sweep_orphaned_document_vectors(self) -> None:
         """Delete vectors whose document row is gone (idempotent).
 
@@ -982,7 +1012,9 @@ class LiteStorage:
             mesh_terms TEXT,  -- JSON array
             source TEXT NOT NULL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            publication_types TEXT  -- JSON array; NULL = not recorded
+            publication_types TEXT,  -- JSON array; NULL = not recorded
+            medline_status TEXT,
+            indexing_method TEXT
         );
 
         -- Search sessions
@@ -1314,6 +1346,8 @@ class LiteStorage:
                         json.dumps(document.mesh_terms),
                         document.source.value,
                         _types_to_json(document.publication_types),
+                        document.medline_status,
+                        document.indexing_method,
                     ),
                 )
 
@@ -1422,6 +1456,8 @@ class LiteStorage:
                             json.dumps(doc.mesh_terms),
                             doc.source.value,
                             _types_to_json(doc.publication_types),
+                            doc.medline_status,
+                            doc.indexing_method,
                         ),
                     )
                     ids.append(doc.id)
@@ -1474,7 +1510,7 @@ class LiteStorage:
                     """
                     SELECT id, title, abstract, authors, year, journal,
                            doi, pmid, pmc_id, url, mesh_terms, source,
-                           publication_types
+                           publication_types, medline_status, indexing_method
                     FROM documents
                     WHERE id = ?
                     """,
@@ -1499,6 +1535,8 @@ class LiteStorage:
                     mesh_terms=json.loads(row["mesh_terms"] or "[]"),
                     source=DocumentSource(row["source"]),
                     publication_types=_types_from_json(row["publication_types"]),
+                    medline_status=row["medline_status"],
+                    indexing_method=row["indexing_method"],
                 )
         except sqlite3.Error as e:
             logger.error(f"Failed to get document {document_id}: {e}")
@@ -1539,7 +1577,7 @@ class LiteStorage:
                     f"""
                     SELECT id, title, abstract, authors, year, journal,
                            doi, pmid, pmc_id, url, mesh_terms, source,
-                           publication_types
+                           publication_types, medline_status, indexing_method
                     FROM documents
                     WHERE id IN ({placeholders})
                     """,
@@ -1562,6 +1600,8 @@ class LiteStorage:
                         mesh_terms=json.loads(row["mesh_terms"] or "[]"),
                         source=DocumentSource(row["source"]),
                         publication_types=_types_from_json(row["publication_types"]),
+                        medline_status=row["medline_status"],
+                        indexing_method=row["indexing_method"],
                     ))
 
                 return documents
@@ -1631,6 +1671,7 @@ class LiteStorage:
                         d.id, d.title, d.abstract, d.authors, d.year,
                         d.journal, d.doi, d.pmid, d.pmc_id, d.url,
                         d.mesh_terms, d.source, d.publication_types,
+                        d.medline_status, d.indexing_method,
                         v.distance
                     FROM vec_documents v
                     JOIN documents d ON d.rowid = v.rowid
@@ -1656,6 +1697,8 @@ class LiteStorage:
                         mesh_terms=json.loads(row["mesh_terms"] or "[]"),
                         source=DocumentSource(row["source"]),
                         publication_types=_types_from_json(row["publication_types"]),
+                        medline_status=row["medline_status"],
+                        indexing_method=row["indexing_method"],
                     ))
 
                 return documents
@@ -3519,6 +3562,25 @@ class LiteStorage:
         with self._sqlite_connection() as conn:
             citation_reads_store.record(conn, checkpoint_id, reads, read_at)
             conn.commit()
+
+    def record_manta_judgement(self, row: manta_store.MantaRow) -> None:
+        """Store one MANTA shadow attempt (replacing the row of the same key).
+
+        Args:
+            row: The attempt.
+        """
+        with self._sqlite_connection() as conn:
+            manta_store.record(conn, row)
+            conn.commit()
+
+    def manta_judgements(self, document_id: str) -> list[manta_store.MantaRow]:
+        """Every MANTA shadow attempt for a paper, oldest first.
+
+        Args:
+            document_id: The paper.
+        """
+        with self._sqlite_connection() as conn:
+            return manta_store.read(conn, document_id)
 
     def get_citation_reads(self, checkpoint_id: str) -> dict[str, bool]:
         """Which text each paper's citations in a run were read from.

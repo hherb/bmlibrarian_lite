@@ -503,7 +503,7 @@ final class PubMedXMLParser: NSObject, XMLParserDelegate {
     /// serves; Android reads the same set (`TEXT_ELEMENTS` in PubMedService.kt).
     static let textElements: Set<String> = [
         "PMID", "ArticleId", "ELocationID", "ArticleTitle", "AbstractText",
-        "LastName", "ForeName", "Title", "Year", "PublicationType",
+        "LastName", "ForeName", "Title", "Year", "PublicationType", "DescriptorName",
     ]
 
     /// An efetch answer as parsed.
@@ -557,6 +557,10 @@ final class PubMedXMLParser: NSObject, XMLParserDelegate {
     private var currentIdType: String?
     /// `nil` until a `<PublicationTypeList>` opens, so an absent list stays unrecorded.
     private var currentPublicationTypes: [String]?
+    /// `nil` until a `<MeshHeadingList>` opens, so an absent list stays unrecorded.
+    private var currentMeshTerms: [String]?
+    private var currentMedlineStatus: String?
+    private var currentIndexingMethod: String?
 
     /// How many `<Reference>` elements are open. A cited paper's
     /// `<ArticleIdList>` sits inside one, and its identifiers are not the
@@ -615,6 +619,11 @@ final class PubMedXMLParser: NSObject, XMLParserDelegate {
             inAbstract = true
         case "PublicationTypeList":
             currentPublicationTypes = []
+        case "MedlineCitation":
+            currentMedlineStatus = attributeDict["Status"]
+            currentIndexingMethod = attributeDict["IndexingMethod"]
+        case "MeshHeadingList":
+            currentMeshTerms = []
         case "Reference":
             referenceDepth += 1
         case "ArticleId":
@@ -666,6 +675,9 @@ final class PubMedXMLParser: NSObject, XMLParserDelegate {
         case "PublicationType":
             // Cited papers carry no types, but the depth guard costs nothing.
             if referenceDepth == 0, !text.isEmpty { currentPublicationTypes?.append(text) }
+        case "DescriptorName":
+            // Qualifier names are not terms; a cited paper carries none.
+            if referenceDepth == 0, !text.isEmpty { currentMeshTerms?.append(text) }
         case "ArticleTitle":
             currentTitle = text
         case "AbstractText":
@@ -738,13 +750,19 @@ final class PubMedXMLParser: NSObject, XMLParserDelegate {
                 // shape PubMed IDs share with Europe PMC's thesis and
                 // case-report accessions (#212).
                 identifierKind: .pubmed,
-                publicationTypes: currentPublicationTypes
+                publicationTypes: currentPublicationTypes,
+                meshTerms: currentMeshTerms,
+                medlineStatus: currentMedlineStatus,
+                indexingMethod: currentIndexingMethod
             )
         )
     }
 
     private func resetCurrentArticle() {
         currentPublicationTypes = nil
+        currentMeshTerms = nil
+        currentMedlineStatus = nil
+        currentIndexingMethod = nil
         currentPMID = ""
         currentPMCID = nil
         currentDOI = nil

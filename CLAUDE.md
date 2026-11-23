@@ -74,6 +74,9 @@ retraction_store.py   # retraction_checks table, PaperCheck
 retraction_checks.py  # RetractionChecker: reuse/replace stored verdicts; an outage never erases one
 retraction_screen.py  # Pure: RetractionScreen (kept/excluded), screen_with_fallback, RetractionSnapshot
 retraction_text.py    # Reader-facing retraction sentences (notice, causes, status lines)
+manta_client.py       # MantaClient: the local MANTA-4B server's judge and reference calls; MantaUnreachable, MantaRefused
+manta_store.py        # manta_judgements table, MantaRow: one row per shadow attempt (judged / unreachable / failed)
+manta_shadow.py       # MantaShadow: background worker judging every LLM-scored paper beside the LLM; shadow_for (off without a localhost URL); is_loopback_manta_url
 keyed_service_session.py # KeyedServiceSession: a keyed service's 429 pause, refused key, refused network (process-wide)
 bot_walls.py          # Bot-wall challenge pages recognised from an answer (#480): WALL_MARKERS, challenge_markers
 pdf_download.py       # PDF download helpers: body prefix, .part, .unchecked and .held files, MAX_PDF_SIZE
@@ -90,13 +93,14 @@ chunking.py           # Text chunking; analysis_windows (every LLM text path: no
 pdf_utils.py          # PDF text extraction (bmlib PyMuPDFConverter: fault side, MuPDF messages, cancel)
 constants.py          # Application constants
 exceptions.py         # Custom exception hierarchy
+tools/manta_server/   # Stand-alone MANTA-4B server: localhost HTTP, ledger, report (never imports the app)
 ```
 
 ## Mobile Apps
 
 **iOS + macOS** (`ios/MedicalFactChecker/`, multiplatform project; macOS-specific views under `Sources/macOS/`):
 - SwiftUI + SwiftData models (Document, FactCheckSession, SearchProvider, FullTextSource, SchemaVersions)
-- Services: FactCheckWorkflow, LLMService, EmbeddingService, ParallelScoringService, ParallelCitationService, CheckpointedScoringService, CheckpointManager, ModelFetchService, CloudKitConfiguration, BackgroundTaskManager
+- Services: FactCheckWorkflow, LLMService, EmbeddingService, ParallelScoringService, ParallelCitationService, CheckpointedScoringService, CheckpointManager, ModelFetchService, CloudKitConfiguration, BackgroundTaskManager, MantaShadow (the MANTA shadow benchmark, off the scoring path)
 - Views: FactCheck, FullText, History, Report, Settings, Onboarding
 - Components: TransparencyDetailView, TransparencyRiskBadge, TransparencySummarySection, ErrorQueueView, ProcessingProgressView
 
@@ -113,7 +117,7 @@ exceptions.py         # Custom exception hierarchy
 
 Shared iOS/macOS components:
 - `JATS/`: XML parsing → HTML/Markdown (JATSXMLParser, JATSModels)
-- `Services/`: EuropePMCService, PubMedService, FullTextService (split by concern into `FullTextService+<concern>.swift` extensions), PMCOpenData (PMC's open-data bucket), OpenAlex, CORE (extracted text), Elsevier (PDFs, with a key), KeyedServiceSession (CORE's and Elsevier's session state), BotWalls (bot-wall challenge pages), PDFTitleCheck (another article's PDF)
+- `Services/`: EuropePMCService, PubMedService (MeSH, MEDLINE status, indexing method), FullTextService (split by concern into `FullTextService+<concern>.swift` extensions), PMCOpenData (PMC's open-data bucket), OpenAlex, CORE (extracted text), Elsevier (PDFs, with a key), KeyedServiceSession (CORE's and Elsevier's session state), BotWalls (bot-wall challenge pages), PDFTitleCheck (another article's PDF), MantaService (the local MANTA server)
 - `Transparency/`: Study transparency analysis
   - `Analysis/`: TransparencyScorer, FundingAnalyzer, COIAnalyzer, DataAvailabilityAnalyzer, TrialComplianceAnalyzer
   - `Models/`: TransparencyModels, TransparencyConstants

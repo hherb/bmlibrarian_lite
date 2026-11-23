@@ -148,16 +148,25 @@ public enum SearchResultMerger {
     /// Folds a duplicate's publication types into the kept article it
     /// duplicates (search_merger.py: union, first-seen order; `nil` adds
     /// nothing), so the `Retracted Publication` label survives whichever
-    /// record is kept.
+    /// record is kept. The kept article also takes the duplicate's MeSH, and
+    /// its MEDLINE status with that status's own indexing method, where it
+    /// has none of its own.
     ///
     /// - Parameters:
     ///   - duplicate: The record not kept.
     ///   - merged: The kept records; the first sharing an identifier takes the
     ///     types, else the first ``areDuplicates(_:_:)`` match (a similar title).
     private static func absorbPublicationTypes(of duplicate: SearchArticle, into merged: inout [SearchArticle]) {
-        guard let types = duplicate.publicationTypes,
-              let index = merged.firstIndex(where: { sharesIdentifier($0, duplicate) })
+        guard let index = merged.firstIndex(where: { sharesIdentifier($0, duplicate) })
                 ?? merged.firstIndex(where: { areDuplicates($0, duplicate) }) else { return }
+        // PubMed's indexing: the kept record's own wins, else the duplicate's.
+        merged[index].meshTerms = merged[index].meshTerms ?? duplicate.meshTerms
+        // a pair: a MEDLINE status with no method means indexed by hand
+        if merged[index].medlineStatus == nil {
+            merged[index].medlineStatus = duplicate.medlineStatus
+            merged[index].indexingMethod = duplicate.indexingMethod
+        }
+        guard let types = duplicate.publicationTypes else { return }
         var union = merged[index].publicationTypes ?? []
         for type in types where !union.contains(type) { union.append(type) }
         merged[index].publicationTypes = union

@@ -93,6 +93,8 @@ class MergedArticle:
     is_preprint: bool = False
     has_fulltext_xml: bool = False
     publication_types: list[str] | None = None
+    medline_status: str | None = None
+    indexing_method: str | None = None
 
     @property
     def primary_source(self) -> DocumentSource:
@@ -135,6 +137,8 @@ class MergedArticle:
             source=self.primary_source,
             is_preprint=self.is_preprint,
             publication_types=self.publication_types,
+            medline_status=self.medline_status,
+            indexing_method=self.indexing_method,
             metadata={
                 "sources": list(self.sources),
                 "has_fulltext_xml": self.has_fulltext_xml,
@@ -305,6 +309,8 @@ class SearchResultMerger:
                     is_preprint=False,
                     has_fulltext_xml=False,
                     publication_types=article.publication_types,
+                    medline_status=article.medline_status,
+                    indexing_method=article.indexing_method,
                 )
             else:
                 # Europe PMC article
@@ -365,6 +371,10 @@ class SearchResultMerger:
             existing.publication_types = list(
                 dict.fromkeys((existing.publication_types or []) + new.publication_types)
             )
+
+        # PubMed's indexing wins; Europe PMC carries none
+        existing.medline_status = existing.medline_status or new.medline_status
+        existing.indexing_method = existing.indexing_method or new.indexing_method
 
         # Update flags
         existing.has_fulltext_xml = existing.has_fulltext_xml or new.has_fulltext_xml

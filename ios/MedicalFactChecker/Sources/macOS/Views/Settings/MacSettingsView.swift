@@ -303,6 +303,16 @@ struct LLMSettingsTab: View {
                     .font(.caption)
                     .foregroundColor(.secondary)
             }
+
+            // MANTA shadow benchmark
+            Section("MANTA") {
+                TextField("MANTA server URL (shadow benchmarking; empty = off)", text: $settings.mantaURL)
+                    .textFieldStyle(.roundedBorder)
+
+                Text("A MANTA server on this Mac only (localhost), such as http://127.0.0.1:8765. It judges each scored paper in the background, beside the LLM; the fact check and its report do not change.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
         }
         .formStyle(.grouped)
         .padding()
