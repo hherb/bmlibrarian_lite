@@ -48,6 +48,12 @@ apps additionally carry their own store version tags (`swift_*`, `appstore_*`).
 
 ### Fixed
 
+- **Claude Haiku 5.5 no longer loses a third of its study-design
+  classifications.** Haiku 5.5 thinks before it answers, and its thinking
+  counts against the answer's token limit. At the classifier's limit of 256,
+  13 of 40 answers in a test were cut off, and those papers were recorded as
+  "unknown" design. The classifier, question expansion and document summary
+  now allow 2048 tokens. Only the tokens generated are billed.
 - **Claude works again on a fresh install (#758).** Claude is sent no
   `temperature` or `top_p`. anthropic 1.x and 2.x (2.x is what a fresh
   `pip install` resolves) have no such parameters, so every Claude call

@@ -483,8 +483,14 @@ QUALITY_ASSESSOR_MODEL = "claude-sonnet-5-5"
 # Temperature for quality classification (lower = more deterministic)
 QUALITY_LLM_TEMPERATURE = 0.1
 
+# Max tokens for a short answer (a classification, an expansion, a summary).
+# A thinking model's thinking counts against the limit: Claude Haiku 5.5 thinks
+# by default and spent up to 362 of 431 tokens on one classification, so the
+# old 256 lost a third of them. Only the tokens generated are billed.
+SHORT_ANSWER_MAX_TOKENS = 2048
+
 # Max tokens for classification response
-QUALITY_CLASSIFIER_MAX_TOKENS = 256
+QUALITY_CLASSIFIER_MAX_TOKENS = SHORT_ANSWER_MAX_TOKENS
 
 # Max tokens for detailed assessment response
 QUALITY_ASSESSOR_MAX_TOKENS = 1024
