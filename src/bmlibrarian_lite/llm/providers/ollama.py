@@ -253,6 +253,7 @@ class OllamaProvider(BaseProvider):
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             stop_reason=ollama_stop_reason(done_reason, response.get("eval_count"), max_tokens),
+            max_tokens=max_tokens,
         )
 
     def _estimate_tokens(self, messages: list[LLMMessage]) -> int:

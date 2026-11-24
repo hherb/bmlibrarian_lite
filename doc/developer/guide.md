@@ -317,6 +317,18 @@ output-token limits and token-usage accounting remain unchanged. No character
 count is used to guess a token limit or to claim that the server read a prompt
 in full.
 
+An agent's answer that generates its whole output limit is asked once more with
+twice the limit (#825), through `LiteBaseAgent._chat_response_retrying_cut`
+(`_chat` and `_chat_prose` use it). The retry is capped at
+`CUT_ANSWER_RETRY_MAX_TOKENS`. On Ollama it must also fit the configured
+`context_window` beside the prompt; with none configured there is no retry. An
+answer that stopped short of its limit ran out of context window and is not
+asked again. A retry that raises keeps the cut answer. Every cut goes to the
+SQLite `cut_answers` table through the recorder that
+`cut_answers.set_recorder` sets (the GUI and MCP server set it), so real use
+re-measures the limits. The benchmarks call the client directly and keep fixed
+limits.
+
 #### Agent System (`agents/`)
 
 All agents inherit from `LiteBaseAgent`:

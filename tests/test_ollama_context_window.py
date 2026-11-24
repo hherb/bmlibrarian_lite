@@ -165,15 +165,20 @@ def _search_agent(provider: str, client: LLMClient) -> LiteSearchAgent:
     return agent
 
 
-@pytest.mark.parametrize(("stop_reason", "cut_off"), [
-    ("max_tokens", True), ("model_context_window_exceeded", True), ("end_turn", False),
-    # unknown, with the whole limit generated (#637)
-    ("new_reason", True),
+@pytest.mark.parametrize(("stop_reason", "raises", "retried"), [
+    ("max_tokens", True, True), ("model_context_window_exceeded", True, True), ("end_turn", False, False),
+    # unknown, with the whole limit generated (#637): cut; the retry's 4096 of
+    # 8192 is not its whole limit, so its unknown reason reads as finished
+    ("new_reason", False, True),
 ])
-def test_anthropics_cut_off_answer_reaches_ask(stop_reason: str, cut_off: bool, tracker: MagicMock) -> None:
+def test_anthropics_cut_off_answer_reaches_ask(
+    stop_reason: str, raises: bool, retried: bool, tracker: MagicMock,
+) -> None:
     """Anthropic's own stop reason, through the real client, decides whether ``ask`` refuses.
 
-    Running out of context window cuts the answer off as the token limit does (#631 item 3).
+    Running out of context window cuts the answer off as the token limit does
+    (#631 item 3). Each answer here generates 4096 tokens, the first one's
+    whole limit, so a cut one is asked once more with twice the limit (#825).
     """
     sdk = MagicMock()
     sdk.messages.create.return_value = SimpleNamespace(
@@ -186,12 +191,15 @@ def test_anthropics_cut_off_answer_reaches_ask(stop_reason: str, cut_off: bool, 
     client._providers["anthropic"] = provider
     agent = _search_agent("anthropic", client)
 
-    if cut_off:
+    if raises:
         with pytest.raises(TruncatedResponseError):
             agent.ask("p")
     else:
         assert agent.ask("p") == '[{"concepts": ['
-    assert sdk.messages.create.call_args.kwargs["max_tokens"] == SMART_SEARCH_MAX_TOKENS
+    calls = sdk.messages.create.call_args_list
+    assert [c.kwargs["max_tokens"] for c in calls] == (
+        [SMART_SEARCH_MAX_TOKENS, 2 * SMART_SEARCH_MAX_TOKENS] if retried else [SMART_SEARCH_MAX_TOKENS]
+    )
 
 
 def test_anthropics_refusal_reaches_ask(tracker: MagicMock) -> None:
@@ -277,3 +285,17 @@ def test_ollamas_cut_off_answer_reaches_ask(
     else:
         assert agent.ask("p") == "answer"
     assert sdk.chat.call_args.kwargs["options"]["num_predict"] == SMART_SEARCH_MAX_TOKENS
+
+
+def test_ollamas_cut_answer_is_asked_again_within_its_window(sdk: MagicMock, tracker: MagicMock) -> None:
+    """Through the real provider: the retry's num_predict is the window less the reported prompt (#825)."""
+    sdk.chat.side_effect = [
+        {"message": {"content": "x"}, "prompt_eval_count": 5000, "eval_count": 2048, "done_reason": "length"},
+        {"message": {"content": "done"}, "prompt_eval_count": 5000, "eval_count": 100, "done_reason": "stop"},
+    ]
+    agent = LiteBaseAgent(config=LiteConfig._from_dict({"models": {"tasks": {"default": {
+        "provider": "ollama", "model": "test-model", "max_tokens": 2048, "context_window": 8192,
+    }}}}), llm_client=_client(sdk))
+
+    assert agent._chat([LLMMessage(role="user", content="q")]) == "done"
+    assert [c.kwargs["options"]["num_predict"] for c in sdk.chat.call_args_list] == [2048, 8192 - 5000]

@@ -291,6 +291,7 @@ class AnthropicProvider(BaseProvider):
             stop_reason=anthropic_stop_reason(
                 response.stop_reason, response.usage.output_tokens, max_tokens
             ),
+            max_tokens=max_tokens,
         )
 
     def _extract_json(self, text: str) -> str:

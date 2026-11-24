@@ -74,6 +74,8 @@ retraction_store.py   # retraction_checks table, PaperCheck
 retraction_checks.py  # RetractionChecker: reuse/replace stored verdicts; an outage never erases one
 retraction_screen.py  # Pure: RetractionScreen (kept/excluded), screen_with_fallback, RetractionSnapshot
 retraction_text.py    # Reader-facing retraction sentences (notice, causes, status lines)
+cut_answers.py        # CutAnswer, raised_limit: a cut answer asked once more with twice its limit (#825); the process-wide recorder
+cut_answers_store.py  # cut_answers table: each answer cut at its token limit, and its retry
 manta_client.py       # MantaClient: the local MANTA-4B server's judge and reference calls; MantaUnreachable, MantaRefused
 manta_store.py        # manta_judgements table, MantaRow: one row per shadow attempt (judged / unreachable / failed)
 manta_shadow.py       # MantaShadow: background worker judging every LLM-scored paper beside the LLM; shadow_for (off without a localhost URL); is_loopback_manta_url

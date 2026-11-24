@@ -181,7 +181,7 @@ class LiteInterrogationAgent(LiteBaseAgent):
                 self._create_user_message(f"Question: {question}"),
             ]
 
-            response = self._chat_response(
+            response = self._chat_response_retrying_cut(
                 messages,
                 task_id="query_expansion",
                 temperature=0.3,
