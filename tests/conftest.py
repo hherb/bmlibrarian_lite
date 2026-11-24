@@ -184,6 +184,20 @@ def _forget_pacing_state() -> Generator[None, None, None]:
     reset_limiters()
 
 
+@pytest.fixture(autouse=True)
+def _no_cut_answer_recorder() -> Generator[None, None, None]:
+    """Record no cut answer unless a test sets a recorder (#825).
+
+    The recorder is process-wide: one a test (or a constructed app window)
+    set would otherwise write later tests' cut answers to its database.
+    """
+    from bmlibrarian_lite import cut_answers
+
+    cut_answers.set_recorder(None)
+    yield
+    cut_answers.set_recorder(None)
+
+
 class _OpenAlexKnowsNoWork:
     """OpenAlex knowing no work by any DOI: the answer that adds nothing."""
 

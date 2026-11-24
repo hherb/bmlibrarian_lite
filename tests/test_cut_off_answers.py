@@ -1,8 +1,9 @@
 """An answer the model stopped at its token limit is never read as a whole one (#631).
 
 The paths whose answer code reads (scoring, citations, the benchmarks) record
-it as its own cause, asked once: asked again with the same limit, it is
-likely cut off again, each time paid. The prose paths (the report, the
+it as its own cause, never asked again with the same limit: it is likely cut
+off again, each time paid (the one retry with a larger limit is
+test_cut_answer_retry.py's, #825). The prose paths (the report, the
 summaries, a document answer) keep what the model wrote and say it stopped.
 """
 

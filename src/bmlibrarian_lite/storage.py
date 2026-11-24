@@ -49,6 +49,7 @@ import sqlite_vec
 
 from . import (
     citation_reads_store,
+    cut_answers_store,
     manta_store,
     rescue_queue_store,
     retraction_store,
@@ -56,6 +57,7 @@ from . import (
     uploaded_full_texts_store,
 )
 from .browser_rescue import RescueEntry, RescueRequest, RescueState, RescueVerdict
+from .cut_answers import CutAnswer
 from .rescue_queue_store import RecordedVerdict
 from .retraction_store import PaperCheck
 from .smart_search_store import RunQuery
@@ -288,6 +290,8 @@ class LiteStorage:
                 conn.executescript(smart_search_store.SCHEMA)
                 # What the MANTA shadow stage found per paper
                 conn.executescript(manta_store.SCHEMA)
+                # The answers cut at their token limit, and their retries (#825)
+                conn.executescript(cut_answers_store.SCHEMA)
                 # Create sqlite-vec virtual tables for document and chunk embeddings
                 conn.execute(
                     f"""
@@ -3572,6 +3576,21 @@ class LiteStorage:
         with self._sqlite_connection() as conn:
             manta_store.record(conn, row)
             conn.commit()
+
+    def record_cut_answer(self, cut: CutAnswer) -> None:
+        """Store an answer cut at its token limit, and what its retry did (#825).
+
+        Args:
+            cut: The cut answer.
+        """
+        with self._sqlite_connection() as conn:
+            cut_answers_store.record(conn, cut)
+            conn.commit()
+
+    def cut_answers(self) -> list[CutAnswer]:
+        """Every answer cut at its token limit, oldest first."""
+        with self._sqlite_connection() as conn:
+            return cut_answers_store.read(conn)
 
     def manta_judgements(self, document_id: str) -> list[manta_store.MantaRow]:
         """Every MANTA shadow attempt for a paper, oldest first.

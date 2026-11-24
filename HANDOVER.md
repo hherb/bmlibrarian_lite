@@ -169,8 +169,17 @@ a git pin). Snapshot rows keep `run_status`/`run_deciding` set-once.
   quality assessment, brief summary, 8192 a report; desktop
   `SHORT_ANSWER_`/`GENERATION_`/`REPORT_MAX_TOKENS`, measured maxima in
   `tests/test_token_limits.py`. Open: #818, #819.
-- **Every search query a fact check ran** (apps, PR #810): `SearchQueryLog`,
-  Android Room 11 → 12; not yet seen on a device or simulator.
+- **A cut answer is asked once more with twice the limit** (desktop, #825):
+  only one that generated its whole limit (short of it, the context window
+  ran out), capped at `CUT_ANSWER_RETRY_MAX_TOKENS` 16384 (the SDK refuses
+  a non-streaming request past ~21k), and on Ollama only within a configured
+  `context_window`. In `_chat`/`_chat_prose` (`_chat_response_retrying_cut`),
+  never `_chat_response`; the benchmarks call the client, so keep fixed
+  limits. Every cut goes to SQLite `cut_answers` through the process-wide
+  `cut_answers.set_recorder` (the GUI and MCP server set it; tests reset it).
+  `LLMResponse.max_tokens` says the limit asked; None never retries. The apps
+  wait on #822.
+- **Every search query a fact check ran** (apps, PR #810): `SearchQueryLog`, Android Room 11 → 12.
 - **Strict service JSON** (#781, #784): every service's JSON but esearch is
   read strictly (desktop `search_failures.strict_response_json`, **a test
   double scripts `.content`, never `.json()`**; Android `strictJsonElement`).
@@ -206,7 +215,7 @@ a git pin). Snapshot rows keep `run_status`/`run_deciding` set-once.
   could move. **A skip is a third state** (`SourceLookupSkipped`). Never
   `findtext` a mixed-content element. Funders: `sponsor_patterns.json` (schema
   4) is the contract, never `INDUSTRY_KEYWORDS`; `NONPROFIT` = not recognised.
-- **Older rounds: the rules that still bind** (detail: git, `doc/cross_platform/`).
+- **Older rounds: the rules that still bind** (detail: git, `doc/cross_platform/`):
   - **A source we could not reach is not a finding** (#346, #347, #344,
     PR #349). A typed fetch carries the answer *or* a `RequestFailure`
     (`served()` / `absent()` / `unreachable()`: `RecordFetch`,
@@ -254,7 +263,8 @@ Open issues by family; each issue carries the detail. None blocks another.
   stage's parked follow-ups (untested paths, an unbounded queue, the wire
   contract fixture): **#815**.
 - **Android's real LLM usage (#818)** and **HyDE refusals (#819)**, from the
-  #813 measurement. **#822** neither app notices an answer cut at its limit.
+  #813 measurement. **#822** neither app notices an answer cut at its limit
+  (then port #825's retry).
   **#823** Haiku 5.5 refused 1 of 10 desktop quality assessments (read as
   unclassified).
 - **From the bmlib syncs.** PR #757's issues are fixed and unreleased (a
@@ -266,39 +276,19 @@ Open issues by family; each issue carries the detail. None blocks another.
 - **Retraction checking** follow-ups (#662, #726–#728, #730, #731 and
   #737–#739 landed; **their rules, the unreadable-snapshot ones above all,
   are in `doc/developer/retraction_checking.md`**: read it before touching
-  a snapshot, a stored check or a *Check again* line).
-  Apple **#647** (left: a fail-under-XCTest default; the shared Crossref
-  lookup (its pacing reserved before the sleep, so concurrent callers queue),
-  decoding once per JSON text (`DecodeMemo`) and the unreadable-index log
-  landed in PR #756), **#649**
-  (test gaps mostly closed; `RetractionRun` lives in its own file; left: the
-  cited report's wiring, *Check again*'s failed save and `smartSearchNotice`'s
-  reset, each needing a seam (for the last: `SearchServiceFactory.search`
-  builds its own services from settings, ignoring `useServices`, so neither
-  setter of the notice is reachable offline); the type items;
-  an unknown lookup name falling back to its raw key in reader text; an
-  all-orphaned snapshot reading "never checked", a wording decision;
-  `RetractionCrossrefLookup` now takes a `retry:` for tests),
-  **#653**, **#654** items 3 and 4 (the not-saved note said once, a failed
-  check recomputing the warning; items 1 and 2 done), **#658** (Android;
-  left: the type items (the `PaperRetractionCheck` and `CrossrefAnswer`
-  invariants, a cross-platform decision; `publicationTypes` nullable;
-  `paperKey` a function); whether a full disk's `Refused` should wait a
-  day). **A failed stored read asks every paper afresh and stores nothing**
-  (#720, all three). **A failed check for a paper with no row fills only a
-  row still missing** (Android's `insertIfAbsent`, in one transaction with
-  the REPLACE rows; the desktop's `keep_existing`). **The stored-check read
-  binds at most 999 keys** (SQLite before API 31): read through
-  `RetractionService.storedChecks`, never `RetractionCheckDao.get` direct.
-  **A view that replaces its workflow or whose window closes calls the
-  outgoing one's `cancelCheckAgain()`** (#708, #711; keep it at any new such site).
-  **A SwiftData model is inserted before it is linked**: an `EvidenceReport`
-  linked, uninserted, to a session that already had one crashed iOS 18 /
-  macOS 15 on every second report (Find More Evidence, Retry Report; PR #722).
-  Only CI's macos-15 runner or an iOS 18 simulator shows it, not macOS 26+.
-  **Open: #713** (does a closed iPad scene's root `onDisappear` fire? needs a
-  simulator or device by hand); **#704** (a full disk is only logged; reader
-  text needs a decision).
+  a snapshot, a stored check or a *Check again* line). Open, each issue
+  carrying what is left: Apple **#647**, **#649**, **#653**, **#654**
+  (items 3, 4); Android **#658**; **#713** (a closed iPad scene's
+  `onDisappear`, by hand); **#704** (a full disk is only logged).
+  Rules that bind: **a failed stored read asks every paper afresh and stores
+  nothing** (#720, all three); **a failed check for a paper with no row fills
+  only a row still missing** (Android's `insertIfAbsent`, the desktop's
+  `keep_existing`); **the stored-check read binds at most 999 keys** (read
+  through `RetractionService.storedChecks`, never `RetractionCheckDao.get`);
+  **a view that replaces its workflow or whose window closes calls the
+  outgoing one's `cancelCheckAgain()`** (#708, #711); **a SwiftData model is
+  inserted before it is linked** (PR #722: only CI's macos-15 or an iOS 18
+  simulator shows the crash).
 - **bmlib port plan** (`doc/plans/2026-10-17-port-bmlib-advances.md`):
   Phases 3–6, each needing its own plan first (Phase 4 as adapter work over
   the Rust parser). bmlib audit leftovers: **#571**, **#573**–**#581**,

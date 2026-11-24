@@ -149,6 +149,12 @@ SHORT_ANSWER_MAX_TOKENS = 2048
 GENERATION_MAX_TOKENS = 4096
 # A report (2,675 from six papers' citations; a review cites more).
 REPORT_MAX_TOKENS = 8192
+# An answer that used its whole limit is asked once more with this many times
+# the limit (#825): how long a thinking model thinks varies between runs.
+CUT_ANSWER_RETRY_FACTOR = 2
+# The retry's limit never passes this: past about 21,000 tokens the Anthropic
+# SDK refuses a request that does not stream.
+CUT_ANSWER_RETRY_MAX_TOKENS = 16384
 
 # Default Ollama host URL
 DEFAULT_OLLAMA_HOST = "http://localhost:11434"

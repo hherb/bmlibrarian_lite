@@ -101,6 +101,8 @@ class LLMResponse:
         output_tokens: Number of output tokens generated.
         total_tokens: Total tokens used (input + output).
         stop_reason: Why the model stopped generating.
+        max_tokens: The output limit the request asked for; None when not
+            known (a test double), so the answer is never judged against it.
     """
 
     content: str
@@ -109,6 +111,7 @@ class LLMResponse:
     output_tokens: int = 0
     total_tokens: int = 0
     stop_reason: Optional[str] = None
+    max_tokens: int | None = None
 
     def __post_init__(self) -> None:
         """Calculate total tokens if not provided."""

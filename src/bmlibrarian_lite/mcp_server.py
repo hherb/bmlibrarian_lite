@@ -39,6 +39,7 @@ from mcp.server.session import ServerSession
 from mcp.server.stdio import stdio_server
 from mcp.types import TextContent, Tool
 
+from bmlibrarian_lite import cut_answers
 from bmlibrarian_lite.agents.citation_agent import LiteCitationAgent
 from bmlibrarian_lite.agents.interrogation_agent import LiteInterrogationAgent
 from bmlibrarian_lite.agents.reporting_agent import LiteReportingAgent
@@ -1107,6 +1108,7 @@ def _make_server(config: LiteConfig) -> tuple[Server, _AgentsContext]:
         Tuple of (Server, _AgentsContext) for lifecycle management.
     """
     storage = LiteStorage(config)
+    cut_answers.set_recorder(storage.record_cut_answer)
     llm_client = LLMClient()
 
     ctx = _AgentsContext(

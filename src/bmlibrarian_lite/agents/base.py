@@ -31,6 +31,8 @@ from bmlib.agents import JSON_CORRECTION_NOTE
 from bmlib.llm.utils import strict_json_loads
 
 from bmlibrarian_lite.llm import LLMClient, LLMMessage, LLMResponse
+from bmlibrarian_lite.llm.client import PROVIDER_OLLAMA
+from .. import cut_answers
 from ..config import LiteConfig, TaskModelConfig
 from ..exceptions import RefusedResponseError, TruncatedResponseError
 from ..utils import json_correction_due
@@ -214,7 +216,8 @@ class LiteBaseAgent:
             Response text from the LLM
 
         Raises:
-            TruncatedResponseError: The answer reached its token limit. Asked
+            TruncatedResponseError: The answer reached its token limit, and
+                again when asked once more with a larger one (#825). Asked
                 again with the same limit it is likely cut off again, so a
                 caller that retries an unreadable answer must not retry this.
                 It carries what the model wrote.
@@ -223,7 +226,9 @@ class LiteBaseAgent:
         """
         if json_correction_due():
             messages = with_json_correction(messages)
-        response = self._chat_response(messages, task_id, temperature, max_tokens, json_mode)
+        response = self._chat_response_retrying_cut(
+            messages, task_id, temperature, max_tokens, json_mode
+        )
         _raise_if_refused(response)
         if response.stop_reason == STOP_REASON_MAX_TOKENS:
             raise TruncatedResponseError(
@@ -242,7 +247,8 @@ class LiteBaseAgent:
     ) -> str:
         """Send a chat request for text the reader reads as written.
 
-        Unlike :meth:`_chat`, an answer cut off at its token limit is kept:
+        Unlike :meth:`_chat`, an answer cut off at its token limit (and again
+        when asked once more with a larger one, #825) is kept:
         what the model wrote is still read, and :data:`CUT_OFF_PROSE_NOTE`
         after it says it is incomplete. Reasoning it never closed is dropped,
         and a code block it never closed is closed, so the note renders as text.
@@ -262,7 +268,7 @@ class LiteBaseAgent:
             RefusedResponseError: The model declined to answer: what it wrote
                 before declining is not the answer.
         """
-        response = self._chat_response(messages, task_id, temperature, max_tokens)
+        response = self._chat_response_retrying_cut(messages, task_id, temperature, max_tokens)
         _raise_if_refused(response)
         if response.stop_reason != STOP_REASON_MAX_TOKENS:
             return response.content
@@ -281,6 +287,73 @@ class LiteBaseAgent:
         )
         return f"{prose}\n\n{CUT_OFF_PROSE_NOTE}"
 
+    def _chat_response_retrying_cut(
+        self,
+        messages: list[LLMMessage],
+        task_id: str | None = None,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+        json_mode: bool = False,
+    ) -> LLMResponse:
+        """:meth:`_chat_response`, asked once more with a larger limit when cut (#825).
+
+        An answer that generated its whole limit is asked again with the
+        limit :func:`cut_answers.raised_limit` allows, and the retry's answer
+        is returned, cut or not. One that stopped short of its limit is not:
+        the context window ran out, and a larger limit does not change that.
+        On Ollama the retry must fit the configured ``context_window`` beside
+        the prompt; with none configured the window is unknown, so it is not
+        asked again. Every cut is recorded (:func:`cut_answers.record`).
+
+        Args:
+            messages: List of conversation messages
+            task_id: Task identifier for config lookup (uses class TASK_ID if None)
+            temperature: Optional temperature override
+            max_tokens: Optional max tokens override
+            json_mode: Request JSON-formatted output
+
+        Returns:
+            The answer, or the retry's when the answer was asked again
+        """
+        response = self._chat_response(messages, task_id, temperature, max_tokens, json_mode)
+        if response.stop_reason != STOP_REASON_MAX_TOKENS or response.max_tokens is None:
+            return response
+        task_config = self._get_task_config(task_id)
+        room: int | None = None
+        if task_config.provider == PROVIDER_OLLAMA:
+            window = task_config.context_window
+            room = window - response.input_tokens if window else 0
+        cut = cut_answers.CutAnswer(
+            task_id=task_id or self.TASK_ID,
+            model=self._get_model(task_id),
+            max_tokens=response.max_tokens,
+            output_tokens=response.output_tokens,
+            retry_max_tokens=cut_answers.raised_limit(
+                response.output_tokens, response.max_tokens, room
+            ),
+        )
+        if cut.retry_max_tokens is None:
+            cut_answers.record(cut)
+            return response
+        logger.warning(
+            f"The answer from {cut.model} reached its token limit ({cut.max_tokens}); "
+            f"asking once more with {cut.retry_max_tokens}"
+        )
+        retry: LLMResponse | None = None
+        try:
+            retry = self._chat_response(
+                messages, task_id, temperature, cut.retry_max_tokens, json_mode
+            )
+            return retry
+        finally:
+            if retry is not None:
+                cut = dataclasses.replace(
+                    cut,
+                    retry_output_tokens=retry.output_tokens,
+                    retry_cut=retry.stop_reason == STOP_REASON_MAX_TOKENS,
+                )
+            cut_answers.record(cut)
+
     def _chat_response(
         self,
         messages: list[LLMMessage],
@@ -292,7 +365,8 @@ class LiteBaseAgent:
         """Send a chat request and return the whole response, unchecked.
 
         :meth:`_chat` and :meth:`_chat_prose` check why the model stopped;
-        a caller of this one reads ``stop_reason`` itself.
+        a caller of this one reads ``stop_reason`` itself. A cut answer is
+        not asked again: :meth:`_chat_response_retrying_cut` does that.
 
         Args:
             messages: List of conversation messages

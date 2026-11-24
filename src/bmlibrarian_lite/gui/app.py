@@ -46,6 +46,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from bmlibrarian_lite import cut_answers
 from bmlibrarian_lite.llm.token_tracker import get_token_tracker
 from bmlibrarian_lite.resources.styles.dpi_scale import scaled
 from bmlibrarian_lite.resources.styles.stylesheet_generator import StylesheetGenerator
@@ -133,6 +134,7 @@ class LiteMainWindow(QMainWindow):
         self.config.load_env()
 
         self.storage = LiteStorage(self.config)
+        cut_answers.set_recorder(self.storage.record_cut_answer)
 
         # Token tracker for usage display
         self._token_tracker = get_token_tracker()
