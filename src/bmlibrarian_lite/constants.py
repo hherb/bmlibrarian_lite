@@ -141,7 +141,8 @@ DEFAULT_LLM_MAX_TOKENS = 4096
 # counts against the limit (Claude Haiku 5.5 thinks by default), and a cut
 # answer fails. Bracketed: the longest answer on the desktop's own prompts,
 # Haiku 5.5 and Sonnet 5.5 (#821). Only the tokens generated are billed.
-# A score (603), a query (747), a classification (431, #814), an expansion.
+# A score (603), a query (747), a classification (431, #814); unmeasured:
+# the interrogation tab's answer, summary and query expansion.
 SHORT_ANSWER_MAX_TOKENS = 2048
 # Alternative queries (1,764), citations (1,190 from a full-text window), a
 # quality assessment (1,347), a brief summary (1,326).

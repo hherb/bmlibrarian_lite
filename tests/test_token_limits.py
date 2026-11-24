@@ -5,6 +5,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from bmlibrarian_lite.agents.reporting_agent import LiteReportingAgent
+from bmlibrarian_lite.benchmarking.runner import BenchmarkRunner
 from bmlibrarian_lite.config import BenchmarkModelConfig, LiteConfig
 from bmlibrarian_lite.constants import (
     QUALITY_ASSESSOR_MAX_TOKENS,
@@ -25,18 +26,23 @@ LONGEST_CLASSIFICATION = 431
 LONGEST_BRIEF_SUMMARY = 1326
 LONGEST_REPORT = 2675
 
+# Thinking varies from run to run, so a limit the longest answer only just fits
+# is no room: the old report (4096) and query (1000) limits fitted that narrowly
+HEADROOM = 2
+
+
+def has_room(limit: int, longest: int) -> bool:
+    """A limit that holds twice the longest answer measured."""
+    return limit >= HEADROOM * longest
+
 
 @pytest.mark.parametrize(("task_id", "longest"), [
     ("document_scoring", LONGEST_SCORE),
     ("citation_extraction", LONGEST_CITATIONS),
-    ("query_conversion", LONGEST_QUERY),
-    ("quality_assessment", LONGEST_QUALITY_ASSESSMENT),
-    ("study_classification", LONGEST_CLASSIFICATION),
-    ("report_generation", LONGEST_REPORT),
 ])
 def test_an_unconfigured_task_gets_room_for_its_longest_answer(task_id: str, longest: int) -> None:
     """Scoring and citations call ``_chat`` with no limit, so the task default is what they send."""
-    assert LiteConfig().models.get_task_config(task_id).max_tokens > longest
+    assert has_room(LiteConfig().models.get_task_config(task_id).max_tokens, longest)
 
 
 @pytest.mark.parametrize(("limit", "longest"), [
@@ -44,11 +50,12 @@ def test_an_unconfigured_task_gets_room_for_its_longest_answer(task_id: str, lon
     (QUALITY_ASSESSOR_MAX_TOKENS, LONGEST_QUALITY_ASSESSMENT),
     (QUALITY_CLASSIFIER_MAX_TOKENS, LONGEST_CLASSIFICATION),
     (BenchmarkModelConfig().max_tokens, LONGEST_SCORE),
+    (BenchmarkModelConfig.from_dict({"provider": "anthropic", "model": "m"}).max_tokens, LONGEST_SCORE),
     (Evaluator.from_model_config("anthropic", "m").max_tokens, LONGEST_SCORE),
 ])
 def test_a_named_limit_has_room_for_its_longest_answer(limit: int, longest: int) -> None:
-    """The limits the calls pass themselves, and the benchmark's scoring default."""
-    assert limit > longest
+    """The limits the calls pass themselves, and the benchmark's scoring defaults."""
+    assert has_room(limit, longest)
 
 
 def test_query_conversion_sends_room_for_its_longest_answer() -> None:
@@ -58,7 +65,7 @@ def test_query_conversion_sends_room_for_its_longest_answer() -> None:
 
     LiteQueryConverter(llm_client=client, model="anthropic:m").convert("Does aspirin prevent stroke?")
 
-    assert client.chat.call_args.kwargs["max_tokens"] > LONGEST_QUERY
+    assert has_room(client.chat.call_args.kwargs["max_tokens"], LONGEST_QUERY)
 
 
 def test_report_and_summary_send_room_for_their_longest_answers() -> None:
@@ -71,8 +78,31 @@ def test_report_and_summary_send_room_for_their_longest_answers() -> None:
     )
 
     agent.generate_report("Q?", [citation])
-    agent.generate_brief_summary("Q?", [citation])
+    assert has_room(agent._chat_prose.call_args.kwargs["max_tokens"], LONGEST_REPORT)
 
-    report, summary = (c.kwargs["max_tokens"] for c in agent._chat_prose.call_args_list)
-    assert report > LONGEST_REPORT
-    assert summary > LONGEST_BRIEF_SUMMARY
+    agent.generate_brief_summary("Q?", [citation])
+    assert has_room(agent._chat_prose.call_args.kwargs["max_tokens"], LONGEST_BRIEF_SUMMARY)
+
+
+def test_a_benchmark_run_scores_with_room_for_its_longest_answer() -> None:
+    """``run_benchmark`` builds its evaluators with the runner's own default."""
+    runner = BenchmarkRunner(config=LiteConfig(), storage=MagicMock())
+
+    (evaluator,) = runner.create_evaluators_from_models(["anthropic:m"])
+
+    assert has_room(evaluator.max_tokens, LONGEST_SCORE)
+
+
+def test_an_evaluator_without_a_limit_scores_with_room_for_its_longest_answer() -> None:
+    """A stored evaluator whose limit is NULL falls back to the scoring limit."""
+    runner = BenchmarkRunner(config=LiteConfig(), storage=MagicMock())
+    runner._llm_client = MagicMock()
+    runner._llm_client.chat.return_value = LLMResponse(content='{"score": 4, "explanation": "On topic."}')
+    evaluator = Evaluator.from_model_config("anthropic", "m")
+    evaluator.max_tokens = None
+
+    runner._score_document(
+        document=LiteDocument(id="d1", title="T", abstract="A"), question="Q?", evaluator=evaluator
+    )
+
+    assert has_room(runner._llm_client.chat.call_args.kwargs["max_tokens"], LONGEST_SCORE)

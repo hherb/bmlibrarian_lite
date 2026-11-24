@@ -163,9 +163,10 @@ a git pin). Snapshot rows keep `run_status`/`run_deciding` set-once.
   (MANTA calibrated, Haiku overconfident). Relevance: MANTA-4B ranks as well
   as the Sonnet 5.5 scorer (ρ 0.617 / 0.619). Adopting MANTA is the
   maintainer's call. **Thinking counts against `max_tokens`** (Haiku 5.5
-  thinks by default, iOS's endpoint too). **Limits, measured on all three
-  (#813, #821):** 2048 a score/query/classification, 4096 alternative
-  queries, HyDE, citations, quality assessment, 8192 a report; desktop
+  thinks by default, iOS's endpoint too). **Limits, measured on the apps
+  (#813) and the desktop (#821):** 2048 a score/query/classification, 4096
+  alternative queries (outgrew 1024 even without thinking), HyDE, citations,
+  quality assessment, brief summary, 8192 a report; desktop
   `SHORT_ANSWER_`/`GENERATION_`/`REPORT_MAX_TOKENS`, measured maxima in
   `tests/test_token_limits.py`. Open: #818, #819.
 - **Every search query a fact check ran** (apps, PR #810): `SearchQueryLog`,

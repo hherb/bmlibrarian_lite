@@ -82,13 +82,15 @@ apps additionally carry their own store version tags (`swift_*`, `appstore_*`).
   - Scoring outgrew 512 on 2 of 80 calls (up to 603), and the relevance
     benchmark scored with only 256.
 
-  The desktop now uses the apps' limits: 2048 for a score, a query
-  conversion or a classification (the benchmark's scoring default too), 4096
-  for alternative queries, citations, a quality assessment and the brief
-  summary, and 8192 for a report (up from 4096). A task given its own
-  `max_tokens` in `config.json` keeps it. Only the tokens generated are
-  billed. On Ollama the
-  limit is `num_predict`; the context size (`num_ctx`) does not change.
+  The desktop now uses the apps' limits: 2048 for a score or a query
+  conversion (the benchmark's scoring default too; a classification has had
+  it since #814), 4096 for alternative queries, citations, a quality
+  assessment and the brief summary, and 8192 for a report (up from 4096).
+  Scoring and citations keep a `max_tokens` set for them in `config.json`;
+  the other calls use the limits above. A benchmark run after this one
+  lists each model as a new evaluator, since the limit is part of its id.
+  Only the tokens generated are billed. On Ollama the limit is
+  `num_predict`; the context size (`num_ctx`) does not change.
 - **Claude works again on a fresh install (#758).** Claude is sent no
   `temperature` or `top_p`. anthropic 1.x and 2.x (2.x is what a fresh
   `pip install` resolves) have no such parameters, so every Claude call
