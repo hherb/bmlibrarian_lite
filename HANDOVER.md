@@ -162,13 +162,13 @@ a git pin). Snapshot rows keep `run_status`/`run_deciding` set-once.
   Design: MANTA-4B 89 %, the Haiku 5.5 classifier 84 %, bmlib's rules 39 %
   (MANTA calibrated, Haiku overconfident). Relevance: MANTA-4B ranks as well
   as the Sonnet 5.5 scorer (ρ 0.617 / 0.619). Adopting MANTA is the
-  maintainer's call. **Thinking counts against `max_tokens`**: Haiku 5.5
-  thinks by default, on Anthropic's OpenAI-compatible endpoint (iOS) too.
-  Desktop: `SHORT_ANSWER_MAX_TOKENS` (2048). **Apps (#813, measured):** 2048
-  for a score or query, 4096 for alternative queries, HyDE and citations
-  (alternative queries outgrew 1024 even without thinking), 8192 for a
-  report. Android's recorded usage is estimated (**#818**); Haiku refuses
-  some HyDE prompts (**#819**).
+  maintainer's call. **Thinking counts against `max_tokens`** (Haiku 5.5
+  thinks by default, iOS's endpoint too). **Limits, measured on the apps
+  (#813) and the desktop (#821):** 2048 a score/query/classification, 4096
+  alternative queries (outgrew 1024 even without thinking), HyDE, citations,
+  quality assessment, brief summary, 8192 a report; desktop
+  `SHORT_ANSWER_`/`GENERATION_`/`REPORT_MAX_TOKENS`, measured maxima in
+  `tests/test_token_limits.py`. Open: #818, #819.
 - **Every search query a fact check ran** (apps, PR #810): `SearchQueryLog`,
   Android Room 11 → 12; not yet seen on a device or simulator.
 - **Strict service JSON** (#781, #784): every service's JSON but esearch is
@@ -254,7 +254,9 @@ Open issues by family; each issue carries the detail. None blocks another.
   stage's parked follow-ups (untested paths, an unbounded queue, the wire
   contract fixture): **#815**.
 - **Android's real LLM usage (#818)** and **HyDE refusals (#819)**, from the
-  #813 measurement.
+  #813 measurement. **#822** neither app notices an answer cut at its limit.
+  **#823** Haiku 5.5 refused 1 of 10 desktop quality assessments (read as
+  unclassified).
 - **From the bmlib syncs.** PR #757's issues are fixed and unreleased (a
   0.6.1 is the maintainer's call; PRs #765–#767, #771, #774, #775). Still
   deferred: #768, #769 (apps' Ollama), #770 (prompts ask for null), #773

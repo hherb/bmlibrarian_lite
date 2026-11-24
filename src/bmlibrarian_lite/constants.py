@@ -137,6 +137,19 @@ DEFAULT_LLM_TEMPERATURE = 0.3
 # Default max tokens for LLM responses
 DEFAULT_LLM_MAX_TOKENS = 4096
 
+# Output limits per kind of answer, as on the apps. A thinking model's thinking
+# counts against the limit (Claude Haiku 5.5 thinks by default), and a cut
+# answer fails. Bracketed: the longest answer on the desktop's own prompts,
+# Haiku 5.5 and Sonnet 5.5 (#821). Only the tokens generated are billed.
+# A score (603), a query (747), a classification (431, #814); unmeasured:
+# the interrogation tab's answer, summary and query expansion.
+SHORT_ANSWER_MAX_TOKENS = 2048
+# Alternative queries (1,764), citations (1,190 from a full-text window), a
+# quality assessment (1,347), a brief summary (1,326).
+GENERATION_MAX_TOKENS = 4096
+# A report (2,675 from six papers' citations; a review cites more).
+REPORT_MAX_TOKENS = 8192
+
 # Default Ollama host URL
 DEFAULT_OLLAMA_HOST = "http://localhost:11434"
 
@@ -165,7 +178,7 @@ LLM_TASK_TYPES = {
         "description": "Convert natural language to PubMed queries",
         "category": "search",
         "default_temperature": 0.1,
-        "default_max_tokens": 512,
+        "default_max_tokens": SHORT_ANSWER_MAX_TOKENS,
         "complexity": "low",
         "recommended_models": ["claude-haiku-5-5", "llama3.2", "mistral"],
     },
@@ -174,7 +187,7 @@ LLM_TASK_TYPES = {
         "description": "Score document relevance (1-5 scale)",
         "category": "analysis",
         "default_temperature": 0.1,
-        "default_max_tokens": 512,
+        "default_max_tokens": SHORT_ANSWER_MAX_TOKENS,
         "complexity": "medium",
         "recommended_models": ["claude-haiku-5-5", "claude-sonnet-5-5"],
     },
@@ -183,7 +196,7 @@ LLM_TASK_TYPES = {
         "description": "Extract relevant passages from documents",
         "category": "analysis",
         "default_temperature": 0.1,
-        "default_max_tokens": 512,
+        "default_max_tokens": GENERATION_MAX_TOKENS,
         "complexity": "medium",
         "recommended_models": ["claude-haiku-5-5", "claude-sonnet-5-5"],
     },
@@ -192,7 +205,7 @@ LLM_TASK_TYPES = {
         "description": "Generate synthesis reports from citations",
         "category": "generation",
         "default_temperature": 0.3,
-        "default_max_tokens": 4096,
+        "default_max_tokens": REPORT_MAX_TOKENS,
         "complexity": "high",
         "recommended_models": ["claude-sonnet-5-5", "claude-opus-5-5"],
     },
@@ -201,7 +214,7 @@ LLM_TASK_TYPES = {
         "description": "Generate alternative query phrasings",
         "category": "search",
         "default_temperature": 0.3,
-        "default_max_tokens": 200,
+        "default_max_tokens": SHORT_ANSWER_MAX_TOKENS,
         "complexity": "low",
         "recommended_models": ["claude-haiku-5-5", "llama3.2", "mistral"],
     },
@@ -210,7 +223,7 @@ LLM_TASK_TYPES = {
         "description": "Answer questions about documents",
         "category": "interrogation",
         "default_temperature": 0.2,
-        "default_max_tokens": 2048,
+        "default_max_tokens": SHORT_ANSWER_MAX_TOKENS,
         "complexity": "high",
         "recommended_models": ["claude-sonnet-5-5", "llama3.2:70b"],
     },
@@ -219,7 +232,7 @@ LLM_TASK_TYPES = {
         "description": "Generate document summaries",
         "category": "interrogation",
         "default_temperature": 0.2,
-        "default_max_tokens": 500,
+        "default_max_tokens": SHORT_ANSWER_MAX_TOKENS,
         "complexity": "medium",
         "recommended_models": ["claude-haiku-5-5", "claude-sonnet-5-5"],
     },
@@ -228,7 +241,7 @@ LLM_TASK_TYPES = {
         "description": "Classify study design type",
         "category": "quality",
         "default_temperature": 0.1,
-        "default_max_tokens": 256,
+        "default_max_tokens": SHORT_ANSWER_MAX_TOKENS,
         "complexity": "low",
         "recommended_models": ["claude-haiku-5-5", "llama3.2"],
     },
@@ -237,7 +250,7 @@ LLM_TASK_TYPES = {
         "description": "Detailed evidence quality assessment",
         "category": "quality",
         "default_temperature": 0.1,
-        "default_max_tokens": 1024,
+        "default_max_tokens": GENERATION_MAX_TOKENS,
         "complexity": "high",
         "recommended_models": ["claude-sonnet-5-5"],
     },
@@ -483,17 +496,12 @@ QUALITY_ASSESSOR_MODEL = "claude-sonnet-5-5"
 # Temperature for quality classification (lower = more deterministic)
 QUALITY_LLM_TEMPERATURE = 0.1
 
-# Max tokens for a short answer (a classification, an expansion, a summary).
-# A thinking model's thinking counts against the limit: Claude Haiku 5.5 thinks
-# by default and spent up to 362 of 431 tokens on one classification, so the
-# old 256 lost a third of them. Only the tokens generated are billed.
-SHORT_ANSWER_MAX_TOKENS = 2048
-
-# Max tokens for classification response
+# Max tokens for classification response (Haiku 5.5 spent up to 362 of 431
+# tokens thinking on one, so the old 256 lost a third of them)
 QUALITY_CLASSIFIER_MAX_TOKENS = SHORT_ANSWER_MAX_TOKENS
 
 # Max tokens for detailed assessment response
-QUALITY_ASSESSOR_MAX_TOKENS = 1024
+QUALITY_ASSESSOR_MAX_TOKENS = GENERATION_MAX_TOKENS
 
 # =============================================================================
 # Quality Metadata Confidence Levels
@@ -870,7 +878,7 @@ SMART_SEARCH_THRESHOLD = 3
 SMART_SEARCH_MAX_QUERY_RETRIES = 2
 # The alternative-query request, as on the apps
 SMART_SEARCH_TEMPERATURE = 0.3
-SMART_SEARCH_MAX_TOKENS = 1024
+SMART_SEARCH_MAX_TOKENS = GENERATION_MAX_TOKENS
 
 # =============================================================================
 # Search Failure Reporting (#247)
