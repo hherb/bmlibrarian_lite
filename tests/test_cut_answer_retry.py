@@ -43,16 +43,18 @@ def finished(content: str, max_tokens: int, output_tokens: int = 3000) -> LLMRes
 
 
 class Client:
-    """An LLM client answering each call with the next response, keeping each call's limit."""
+    """An LLM client answering each call with the next response, keeping each call's arguments."""
 
     def __init__(self, *responses: LLMResponse | Exception) -> None:
         """Answer the calls in order."""
         self._responses = list(responses)
         self.limits: list[int] = []
+        self.calls: list[dict[str, Any]] = []
 
-    def chat(self, messages: Any, model: str, max_tokens: int, **_: Any) -> LLMResponse:
+    def chat(self, messages: Any, model: str, max_tokens: int, **kwargs: Any) -> LLMResponse:
         """Answer one call."""
         self.limits.append(max_tokens)
+        self.calls.append({"messages": messages, "model": model, **kwargs})
         assert len(self.limits) <= len(self._responses), "More calls than scripted"
         answer = self._responses[len(self.limits) - 1]
         if isinstance(answer, Exception):
@@ -170,15 +172,44 @@ class TestTheAgentAsksOnceMore:
         assert client.limits == [LIMIT]
         assert recorded == []
 
-    def test_a_failed_retry_is_recorded_and_raised(self, recorded: list[CutAnswer]) -> None:
-        """The cut is still recorded; the retry's error is the caller's."""
+    def test_a_failed_retry_keeps_the_cut_answer(
+        self, recorded: list[CutAnswer], caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """As before #825: ``_chat`` refuses it with its text, the cut recorded with no retry tokens."""
         client = Client(cut("x", LIMIT, LIMIT), ConnectionError("down"))
 
-        with pytest.raises(ConnectionError):
+        with pytest.raises(TruncatedResponseError) as raised:
             agent_on(client)._chat(MESSAGES)
+        assert raised.value.content == "x"
+        assert "keeping the cut answer" in caplog.text
         assert (recorded[0].retry_max_tokens, recorded[0].retry_output_tokens, recorded[0].retry_cut) == (
             2 * LIMIT, None, None
         )
+
+    def test_a_failed_retry_keeps_the_cut_prose_with_its_note(self) -> None:
+        """A cut report is still the reader's, marked as cut (the SDK refusing 16384 on Opus 4.1)."""
+        client = Client(cut("Short report", LIMIT, LIMIT), ValueError("Streaming is required"))
+
+        assert agent_on(client)._chat_prose(MESSAGES) == f"Short report\n\n{CUT_OFF_PROSE_NOTE}"
+
+    def test_the_retry_asks_as_the_answer_was_asked(self, recorded: list[CutAnswer]) -> None:
+        """Same task, model, messages, temperature and JSON mode; only the limit differs."""
+        client = Client(cut('{"a', LIMIT, LIMIT), finished('{"a": 1}', 2 * LIMIT))
+        config = LiteConfig._from_dict({"models": {"tasks": {
+            "default": {"provider": "anthropic", "model": "default-model"},
+            "scoring": {"provider": "anthropic", "model": "scoring-model", "max_tokens": LIMIT},
+        }}})
+        agent = LiteBaseAgent(config=config, llm_client=client)  # type: ignore[arg-type]
+
+        agent._chat(MESSAGES, task_id="scoring", temperature=0.1, json_mode=True)
+
+        first, retry = client.calls
+        assert first == retry
+        assert (first["model"], first["temperature"], first["json_mode"]) == (
+            "anthropic:scoring-model", 0.1, True
+        )
+        assert client.limits == [LIMIT, 2 * LIMIT]
+        assert (recorded[0].task_id, recorded[0].model) == ("scoring", "anthropic:scoring-model")
 
     def test_the_query_expansion_asks_once_more(self) -> None:
         """The interrogation agent's own call reads the retry's lines."""
@@ -229,6 +260,7 @@ class TestTheRecord:
             storage.record_cut_answer(row)
 
         assert storage.cut_answers() == rows
+        assert storage.cut_answers()[0].retry_cut is False
 
     def test_the_app_records_through_its_storage(self, tmp_path: Any) -> None:
         """The recorder the app sets writes the agent's cut to SQLite."""
@@ -252,6 +284,30 @@ class TestTheRecord:
 
         assert agent_on(client)._chat(MESSAGES) == "done"
         assert "Could not record a cut answer" in caplog.text
+
+    def test_any_failed_record_keeps_the_answer(self, caplog: pytest.LogCaptureFixture) -> None:
+        """A record is diagnostics: not only a database error, nothing it raises costs the answer."""
+        def broken(_cut: CutAnswer) -> None:
+            raise PermissionError("data dir")
+
+        cut_answers.set_recorder(broken)
+        client = Client(cut("x", LIMIT, LIMIT), finished("done", 2 * LIMIT))
+
+        assert agent_on(client)._chat(MESSAGES) == "done"
+        assert "Could not record a cut answer" in caplog.text
+
+    def test_the_mcp_server_records_through_its_storage(self, tmp_path: Any) -> None:
+        """Building the server sets the recorder to its own storage."""
+        from bmlibrarian_lite.mcp_server import _make_server
+
+        config = LiteConfig()
+        config.storage.data_dir = tmp_path
+        _, context = _make_server(config)
+        row = CutAnswer("scoring", "anthropic:m", LIMIT, LIMIT)
+
+        cut_answers.record(row)
+
+        assert context.storage.cut_answers() == [row]
 
 
 def test_the_benchmark_keeps_its_fixed_limit() -> None:

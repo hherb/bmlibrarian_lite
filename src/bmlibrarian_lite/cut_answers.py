@@ -17,7 +17,7 @@
 """Answers cut at their token limit, and the one retry with a larger limit (#825).
 
 How long a thinking model thinks varies from run to run, so an answer can
-reach a limit set at twice the longest one measured. Such an answer is asked
+reach a limit set at least twice the longest one measured. Such an answer is asked
 once more with twice the limit, up to :data:`CUT_ANSWER_RETRY_MAX_TOKENS`.
 Each cut is recorded, so real use re-measures the limits. The record goes to
 the recorder the app sets (its ``LiteStorage``); with none set, nothing is
@@ -27,7 +27,6 @@ kept.
 from __future__ import annotations
 
 import logging
-import sqlite3
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -88,6 +87,7 @@ def raised_limit(output_tokens: int, max_tokens: int, room: int | None) -> int |
     return raised if raised > max_tokens else None
 
 
+# Set once at start-up and read into a local per call, so it needs no lock.
 _recorder: Callable[[CutAnswer], None] | None = None
 
 
@@ -102,7 +102,7 @@ def set_recorder(recorder: Callable[[CutAnswer], None] | None) -> None:
 
 
 def record(cut: CutAnswer) -> None:
-    """Record a cut answer. A failed write is logged, never raised: the answer matters more.
+    """Record a cut answer. Any failure is logged, never raised: the answer matters more.
 
     Args:
         cut: The cut answer.
@@ -112,5 +112,5 @@ def record(cut: CutAnswer) -> None:
         return
     try:
         recorder(cut)
-    except sqlite3.Error as e:
+    except Exception as e:  # a record is diagnostics; it must never cost the reader the answer
         logger.warning("Could not record a cut answer (%s, %s): %s", cut.task_id, cut.model, e)

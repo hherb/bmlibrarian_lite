@@ -3588,7 +3588,11 @@ class LiteStorage:
             conn.commit()
 
     def cut_answers(self) -> list[CutAnswer]:
-        """Every answer cut at its token limit, oldest first."""
+        """Every answer cut at its token limit, oldest first.
+
+        Returns:
+            The recorded cut answers, in the order they were recorded.
+        """
         with self._sqlite_connection() as conn:
             return cut_answers_store.read(conn)
 

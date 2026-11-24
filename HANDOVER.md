@@ -177,9 +177,12 @@ a git pin). Snapshot rows keep `run_status`/`run_deciding` set-once.
   never `_chat_response`; the benchmarks call the client, so keep fixed
   limits. Every cut goes to SQLite `cut_answers` through the process-wide
   `cut_answers.set_recorder` (the GUI and MCP server set it; tests reset it).
-  `LLMResponse.max_tokens` says the limit asked; None never retries. The apps
-  wait on #822.
-- **Every search query a fact check ran** (apps, PR #810): `SearchQueryLog`, Android Room 11 → 12.
+  The interrogation agent's query expansion calls it directly. A retry that
+  raises keeps the cut answer (Opus 4/4.1: the SDK refuses past 8192 without
+  streaming). `LLMResponse.max_tokens` says the limit asked; None never
+  retries. The apps wait on #822.
+- **Every search query a fact check ran** (apps, PR #810): `SearchQueryLog`,
+  Android Room 11 → 12; not yet seen on a device or simulator.
 - **Strict service JSON** (#781, #784): every service's JSON but esearch is
   read strictly (desktop `search_failures.strict_response_json`, **a test
   double scripts `.content`, never `.json()`**; Android `strictJsonElement`).

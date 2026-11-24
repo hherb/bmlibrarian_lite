@@ -153,7 +153,8 @@ REPORT_MAX_TOKENS = 8192
 # the limit (#825): how long a thinking model thinks varies between runs.
 CUT_ANSWER_RETRY_FACTOR = 2
 # The retry's limit never passes this: past about 21,000 tokens the Anthropic
-# SDK refuses a request that does not stream.
+# SDK refuses a request that does not stream. Opus 4 and 4.1 it refuses past
+# 8192; that retry raises at once and the cut answer is kept (#825).
 CUT_ANSWER_RETRY_MAX_TOKENS = 16384
 
 # Default Ollama host URL

@@ -285,3 +285,17 @@ def test_ollamas_cut_off_answer_reaches_ask(
     else:
         assert agent.ask("p") == "answer"
     assert sdk.chat.call_args.kwargs["options"]["num_predict"] == SMART_SEARCH_MAX_TOKENS
+
+
+def test_ollamas_cut_answer_is_asked_again_within_its_window(sdk: MagicMock, tracker: MagicMock) -> None:
+    """Through the real provider: the retry's num_predict is the window less the reported prompt (#825)."""
+    sdk.chat.side_effect = [
+        {"message": {"content": "x"}, "prompt_eval_count": 5000, "eval_count": 2048, "done_reason": "length"},
+        {"message": {"content": "done"}, "prompt_eval_count": 5000, "eval_count": 100, "done_reason": "stop"},
+    ]
+    agent = LiteBaseAgent(config=LiteConfig._from_dict({"models": {"tasks": {"default": {
+        "provider": "ollama", "model": "test-model", "max_tokens": 2048, "context_window": 8192,
+    }}}}), llm_client=_client(sdk))
+
+    assert agent._chat([LLMMessage(role="user", content="q")]) == "done"
+    assert [c.kwargs["options"]["num_predict"] for c in sdk.chat.call_args_list] == [2048, 8192 - 5000]

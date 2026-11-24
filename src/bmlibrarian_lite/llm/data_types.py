@@ -102,7 +102,7 @@ class LLMResponse:
         total_tokens: Total tokens used (input + output).
         stop_reason: Why the model stopped generating.
         max_tokens: The output limit the request asked for; None when not
-            known (a test double), so the answer is never judged against it.
+            known (a test double): a cut answer is then not asked again.
     """
 
     content: str
