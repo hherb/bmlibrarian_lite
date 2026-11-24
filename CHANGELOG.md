@@ -54,6 +54,23 @@ apps additionally carry their own store version tags (`swift_*`, `appstore_*`).
   13 of 40 answers in a test were cut off, and those papers were recorded as
   "unknown" design. The classifier, question expansion and document summary
   now allow 2048 tokens. Only the tokens generated are billed.
+- **Apps: Claude 5.5's answers are no longer cut off (#813).** Measured with
+  the apps' own prompts on Claude Haiku 5.5 and Sonnet 5.5:
+  - Smart search's alternative queries needed up to 1,535 tokens, against a
+    limit of 1024. 22 of 40 answers would have been cut, and their JSON left
+    unreadable.
+  - The HyDE abstract went over its limit (iOS 512, Android 500) on 39 of 40
+    calls.
+  - Haiku 5.5 thinks before it answers, on Anthropic's OpenAI-compatible
+    endpoint (iOS) as well as its own API (Android), and its thinking counts
+    against the limit.
+
+  The new limits are the same on both apps: 2048 for a score or a query
+  conversion, 4096 for alternative queries, a HyDE abstract and citations,
+  and 8192 for a report. Scores and query conversions rise from 512
+  (Android's scores from 500); Android's citations rise from 1000 and its
+  report from 2000. Only the tokens generated are billed, and Android's
+  recorded usage figures do not change (#818).
 - **Claude works again on a fresh install (#758).** Claude is sent no
   `temperature` or `top_p`. anthropic 1.x and 2.x (2.x is what a fresh
   `pip install` resolves) have no such parameters, so every Claude call

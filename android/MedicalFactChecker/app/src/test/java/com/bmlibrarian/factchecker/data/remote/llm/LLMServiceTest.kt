@@ -22,6 +22,7 @@ import com.bmlibrarian.factchecker.di.AppModule
 import com.bmlibrarian.factchecker.domain.model.LLMError
 import com.bmlibrarian.factchecker.domain.model.LLMProvider
 import com.bmlibrarian.factchecker.domain.model.StructuredQuery
+import com.bmlibrarian.factchecker.util.Constants
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
@@ -801,6 +802,17 @@ class LLMServiceTest {
         val result = generateAlternativeQueries()
 
         assertEquals(emptyList<StructuredQuery>(), result.getOrThrow())
+    }
+
+    @Test
+    fun `alternative queries are asked with their own limit`() = runTest {
+        // #813: 22 of 40 answers outgrew the old 1024, and a cut answer is unreadable JSON
+        val request = slot<OpenAIChatRequest>()
+        coEvery { openAIApi.chatCompletion(any(), any(), capture(request)) } returns Response.success(OpenAIChatResponse())
+
+        generateAlternativeQueries()
+
+        assertEquals(Constants.LLM_ALTERNATIVE_QUERIES_MAX_TOKENS, request.captured.maxTokens)
     }
 
     @Test

@@ -85,7 +85,7 @@ class HydeGenerator @Inject constructor(
                 model = model,
                 systemPrompt = SYSTEM_PROMPT,
                 userPrompt = prompt,
-                maxTokens = Constants.LLM_SCORING_MAX_TOKENS,
+                maxTokens = Constants.LLM_HYDE_MAX_TOKENS,
                 temperature = 0.7 // Slightly higher temperature for creative generation
             )
 

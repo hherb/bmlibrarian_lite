@@ -336,7 +336,7 @@ class ParallelScoringService @Inject constructor(
 
             // Estimate tokens and cost using companion object function
             val estimatedInput = estimateTokens(claim + input.title + input.abstract)
-            val estimatedOutput = Constants.LLM_SCORING_MAX_TOKENS / Constants.OUTPUT_TOKEN_ESTIMATE_DIVISOR
+            val estimatedOutput = Constants.LLM_SCORING_OUTPUT_ESTIMATE
             val cost = modelInfo?.calculateCost(estimatedInput, estimatedOutput) ?: 0.0
 
             accumulatedInputTokens += estimatedInput

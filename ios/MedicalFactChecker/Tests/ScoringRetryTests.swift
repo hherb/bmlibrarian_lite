@@ -8,10 +8,11 @@ import Testing
 @testable import MedicalFactChecker
 
 /// Answers each chat request with the next canned reply and keeps each
-/// request's last turn, so the real scoring loop runs offline.
+/// request's last turn and token limit, so the real scoring loop runs offline.
 private final class StubChatURLProtocol: URLProtocol {
     nonisolated(unsafe) static var replies: [String] = []
     nonisolated(unsafe) static var asked: [String] = []
+    nonisolated(unsafe) static var maxTokens: [Int] = []
 
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
@@ -20,6 +21,7 @@ private final class StubChatURLProtocol: URLProtocol {
         let sent = (try? JSONSerialization.jsonObject(with: Self.body(of: request))) as? [String: Any]
         let messages = sent?["messages"] as? [[String: Any]]
         Self.asked.append(messages?.last?["content"] as? String ?? "")
+        Self.maxTokens.append(sent?["max_tokens"] as? Int ?? 0)
         let reply = Self.replies[min(Self.asked.count, Self.replies.count) - 1]
         let payload = try! JSONSerialization.data(withJSONObject: [
             "choices": [["message": ["role": "assistant", "content": reply], "finish_reason": "stop"]],
@@ -55,6 +57,7 @@ struct ScoringRetryTests {
     @Test func theScoringLoopAsksAgainWithTheNote() async {
         StubChatURLProtocol.replies = ["I cannot say.", #"{"score": 4, "explanation": "on topic"}"#]
         StubChatURLProtocol.asked = []
+        StubChatURLProtocol.maxTokens = []
         let config = URLSessionConfiguration.ephemeral
         config.protocolClasses = [StubChatURLProtocol.self]
         let llm = LLMService(
@@ -73,6 +76,8 @@ struct ScoringRetryTests {
         #expect(asked.count == 2)
         #expect(asked.first?.contains(ResponseParser.jsonCorrectionNote) == false)
         #expect(asked.last == "\(asked.first ?? "")\n\n\(ResponseParser.jsonCorrectionNote)")
+        // #813: a score's thinking counts against the limit
+        #expect(StubChatURLProtocol.maxTokens == [WorkflowConstants.shortAnswerMaxTokens, WorkflowConstants.shortAnswerMaxTokens])
     }
 
     @Test func theFirstAttemptAsksAsWritten() {

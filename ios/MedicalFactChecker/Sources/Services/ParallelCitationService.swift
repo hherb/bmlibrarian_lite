@@ -325,7 +325,7 @@ actor ParallelCitationService {
             try await llmService.chat(
                 messages: [LLMService.userMessage(prompt)],
                 temperature: 0.1,
-                maxTokens: 4096,
+                maxTokens: WorkflowConstants.generationMaxTokens,
                 jsonMode: true
             )
         }
