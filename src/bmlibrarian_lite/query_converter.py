@@ -35,6 +35,7 @@ import logging
 import re
 from typing import Any, Optional
 
+from bmlibrarian_lite.constants import SHORT_ANSWER_MAX_TOKENS
 from bmlibrarian_lite.llm import LLMClient, LLMMessage
 from bmlibrarian_lite.pubmed.data_types import PubMedQuery
 
@@ -139,7 +140,7 @@ class LiteQueryConverter:
                 messages=[LLMMessage(role="user", content=prompt)],
                 model=self.model,
                 temperature=self.temperature,
-                max_tokens=1000,
+                max_tokens=SHORT_ANSWER_MAX_TOKENS,
                 json_mode=True,
             )
 

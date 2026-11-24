@@ -37,6 +37,7 @@ from .constants import (
     MAX_PUBMED_SEARCH_OFFSET,
     SERVICE_CORE,
     SERVICE_ELSEVIER,
+    SHORT_ANSWER_MAX_TOKENS,
     UNANSWERED_HTTP_STATUSES,
 )
 
@@ -1518,7 +1519,7 @@ class Evaluator:
         provider: str,
         model_name: str,
         temperature: float = 0.1,
-        max_tokens: int = 256,
+        max_tokens: int = SHORT_ANSWER_MAX_TOKENS,
         top_p: Optional[float] = None,
         top_k: Optional[int] = None,
     ) -> "Evaluator":

@@ -54,6 +54,7 @@ from .constants import (
     DEFAULT_LLM_TEMPERATURE,
     DEFAULT_LLM_MAX_TOKENS,
     DEFAULT_OLLAMA_HOST,
+    SHORT_ANSWER_MAX_TOKENS,
     SQLITE_DATABASE_NAME,
     MIN_CHUNK_SIZE,
     EMBEDDING_MODEL_SPECS,
@@ -631,7 +632,7 @@ class BenchmarkModelConfig:
     provider: str = ""
     model: str = ""
     temperature: float = 0.1
-    max_tokens: int = 256
+    max_tokens: int = SHORT_ANSWER_MAX_TOKENS
     enabled: bool = True
     is_baseline: bool = False
 
@@ -653,7 +654,7 @@ class BenchmarkModelConfig:
             provider=data.get("provider", ""),
             model=data.get("model", ""),
             temperature=float(data.get("temperature", 0.1)),
-            max_tokens=int(data.get("max_tokens", 256)),
+            max_tokens=int(data.get("max_tokens", SHORT_ANSWER_MAX_TOKENS)),
             enabled=bool(data.get("enabled", True)),
             is_baseline=bool(data.get("is_baseline", False)),
         )

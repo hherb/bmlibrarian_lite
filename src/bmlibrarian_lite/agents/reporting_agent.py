@@ -31,6 +31,7 @@ from ..analysis_failures import (
     with_analysis_shortfall_notice,
 )
 from ..citation_text import full_text_summary
+from ..constants import GENERATION_MAX_TOKENS, REPORT_MAX_TOKENS
 from ..data_models import AnalysisShortfall, AnalysisStage, Citation, ReportMetadata
 from ..retraction_screen import RetractionRecord
 from ..retraction_text import (
@@ -385,7 +386,7 @@ IMPORTANT: Use ONLY the exact Source and Document ID values provided above. Do n
         ]
 
         try:
-            report = self._chat_prose(messages, temperature=0.3, max_tokens=4096)
+            report = self._chat_prose(messages, temperature=0.3, max_tokens=REPORT_MAX_TOKENS)
 
             # Add references section with risk annotations
             concerns = {}
@@ -483,7 +484,7 @@ CITATION FORMAT: Use [Source](docid:Document ID) with exact values from above.""
         ]
 
         try:
-            return self._chat_prose(messages, temperature=0.2, max_tokens=1024)
+            return self._chat_prose(messages, temperature=0.2, max_tokens=GENERATION_MAX_TOKENS)
         except Exception:
             logger.exception("Failed to generate summary")
             raise

@@ -71,6 +71,24 @@ apps additionally carry their own store version tags (`swift_*`, `appstore_*`).
   (Android's scores from 500); Android's citations rise from 1000 and its
   report from 2000. Only the tokens generated are billed, and Android's
   recorded usage figures do not change (#818).
+- **Desktop: Claude 5.5's answers are no longer cut off (#821).** Measured
+  with the desktop's own prompts on Claude Haiku 5.5 and Sonnet 5.5:
+  - Every citation call on a full-text window outgrew its limit of 512, on
+    both models (up to 1,190 tokens). A cut answer fails, so citations from
+    full text failed for every paper. Half the citation calls on abstracts
+    outgrew the limit too.
+  - Smart search's alternative queries outgrew 1024 on 26 of 40 calls, and a
+    quarter of the detailed quality assessments outgrew 1024.
+  - Scoring outgrew 512 on 2 of 80 calls (up to 603), and the relevance
+    benchmark scored with only 256.
+
+  The desktop now uses the apps' limits: 2048 for a score, a query
+  conversion or a classification (the benchmark's scoring default too), 4096
+  for alternative queries, citations, a quality assessment and the brief
+  summary, and 8192 for a report (up from 4096). A task given its own
+  `max_tokens` in `config.json` keeps it. Only the tokens generated are
+  billed. On Ollama the
+  limit is `num_predict`; the context size (`num_ctx`) does not change.
 - **Claude works again on a fresh install (#758).** Claude is sent no
   `temperature` or `top_p`. anthropic 1.x and 2.x (2.x is what a fresh
   `pip install` resolves) have no such parameters, so every Claude call

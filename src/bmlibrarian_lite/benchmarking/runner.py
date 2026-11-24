@@ -30,7 +30,7 @@ from typing import Any, Callable
 from ..agents.scoring_agent import SCORING_SYSTEM_PROMPT, parse_score_response
 from ..audit_records import UNNAMED_FAILURE_REASON, is_scoring_failure
 from ..config import LiteConfig
-from ..constants import SCORE_MAX, SCORE_MIN, calculate_cost
+from ..constants import SCORE_MAX, SCORE_MIN, SHORT_ANSWER_MAX_TOKENS, calculate_cost
 from ..data_models import (
     BenchmarkRun,
     BenchmarkStatus,
@@ -222,7 +222,7 @@ class BenchmarkRunner:
         self,
         models: list[str],
         temperature: float = 0.1,
-        max_tokens: int = 256,
+        max_tokens: int = SHORT_ANSWER_MAX_TOKENS,
     ) -> list[Evaluator]:
         """
         Create evaluators from model strings.
@@ -667,7 +667,7 @@ Evaluate the relevance of this document to the research question."""
                 messages=messages,
                 model=evaluator.model_string,
                 temperature=evaluator.temperature or 0.1,
-                max_tokens=evaluator.max_tokens or 256,
+                max_tokens=evaluator.max_tokens or SHORT_ANSWER_MAX_TOKENS,
                 json_mode=True,
             )
         except Exception as e:
