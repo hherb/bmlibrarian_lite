@@ -26,16 +26,21 @@ enum WorkflowConstants {
 
     // A thinking model's thinking counts against the limit, and Claude Haiku
     // 5.5 thinks on Anthropic's OpenAI-compatible endpoint too. Measured on
-    // Claude Haiku 5.5 and Sonnet 5.5 with the app's prompts (#813). Only the
-    // tokens generated are billed, so the headroom costs nothing.
+    // Claude Haiku 5.5 and Sonnet 5.5 with the app's prompts on that endpoint
+    // (#813). Only the tokens generated are billed, so the headroom costs
+    // nothing; on Ollama, scoring, queries and HyDE stay under num_ctx's floor.
 
     /// Most output tokens for a short JSON answer: a relevance score, a query
     /// conversion. The longest measured answer was 513 tokens.
     static let shortAnswerMaxTokens = 2048
 
     /// Most output tokens for generated text: a HyDE abstract, alternative
-    /// queries. The longest measured answers were 1,388 and 1,535 tokens.
+    /// queries, citations. The longest measured answers were 1,388 and 1,535
+    /// tokens.
     static let generationMaxTokens = 4096
+
+    /// Most output tokens for a report.
+    static let reportMaxTokens = 8192
 
     // MARK: - Smart Search
 

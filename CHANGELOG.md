@@ -67,9 +67,10 @@ apps additionally carry their own store version tags (`swift_*`, `appstore_*`).
 
   The new limits are the same on both apps: 2048 for a score or a query
   conversion, 4096 for alternative queries, a HyDE abstract and citations,
-  and 8192 for a report. For Android, citations rise from 1000 and the report
-  from 2000. Only the tokens generated are billed, and Android's recorded
-  usage figures do not change (#818).
+  and 8192 for a report. Scores and query conversions rise from 512
+  (Android's scores from 500); Android's citations rise from 1000 and its
+  report from 2000. Only the tokens generated are billed, and Android's
+  recorded usage figures do not change (#818).
 - **Claude works again on a fresh install (#758).** Claude is sent no
   `temperature` or `top_p`. anthropic 1.x and 2.x (2.x is what a fresh
   `pip install` resolves) have no such parameters, so every Claude call

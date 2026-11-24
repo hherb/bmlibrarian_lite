@@ -494,14 +494,16 @@ object Constants {
 
     // The output limits leave room for thinking, which counts against them:
     // Claude Haiku 5.5 thinks by default. Measured on Claude Haiku 5.5 and
-    // Sonnet 5.5 with the app's prompts (#813); the longest answer is given for
-    // each. Only the tokens generated are billed, so the headroom costs nothing.
-    // They match iOS's limits for the same calls.
+    // Sonnet 5.5 with the app's prompts on Anthropic's native API (#813); the
+    // longest answer is given for each. Only the tokens generated are billed.
+    // On Ollama the limit enters num_ctx: a report, and citations on a
+    // full-text window, ask for at least 16384. They match iOS's limits for the
+    // same calls.
 
     /** Maximum tokens for scoring responses (longest measured: 405). */
     const val LLM_SCORING_MAX_TOKENS = 2048
 
-    /** Maximum tokens for citation extraction responses (longest measured: 601). */
+    /** Maximum tokens for citation extraction responses (longest measured: 601, on abstracts). */
     const val LLM_CITATION_MAX_TOKENS = 4096
 
     /** Maximum tokens for report generation responses (longest measured: 1,814). */
