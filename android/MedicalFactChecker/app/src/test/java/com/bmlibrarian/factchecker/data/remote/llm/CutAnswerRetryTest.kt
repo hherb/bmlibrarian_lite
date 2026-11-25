@@ -372,8 +372,28 @@ class CutAnswerRetryTest {
             maxTokens = 2048, onUsage = { i, o -> heard += i to o }
         )
 
-        assertEquals(LLMError.EmptyResponseError(), failed.exceptionOrNull())
+        assertEquals(LLMError.RefusedError("The model claude declined to answer"), failed.exceptionOrNull())
         assertEquals(listOf(120 to 3), heard)
+    }
+
+    // ==================== #819: a refusal is a refusal ====================
+
+    @Test
+    fun `a refusal fails as one, whatever text came with it, and is asked once`() = runTest {
+        openAIReplies(answer("I can't write that study", "content_filter", 12), answer("partial", "refusal", 5))
+
+        assertTrue(ask().exceptionOrNull() is LLMError.RefusedError)
+        assertTrue(ask().exceptionOrNull() is LLMError.RefusedError)
+        assertEquals("never retried", listOf(2048, 2048), asked)
+    }
+
+    @Test
+    fun `a cut answer whose retry is refused fails as a refusal`() = runTest {
+        // the desktop raises the retry's refusal too, never keeping the cut answer
+        openAIReplies(answer("cut", "length", 2048), answer("", "refusal", 4))
+
+        assertTrue(ask().exceptionOrNull() is LLMError.RefusedError)
+        assertEquals(listOf(2048, 4096), asked)
     }
 
     // ==================== #818: each request's real tokens ====================
@@ -393,7 +413,7 @@ class CutAnswerRetryTest {
     @Test
     fun `every task method passes its onUsage to chat`() = runTest {
         // one reply each, its own output count; what the content parses to does not matter
-        openAIReplies(*(1..6).map { answer("{}", "stop", it) }.toTypedArray())
+        openAIReplies(*(1..5).map { answer("{}", "stop", it) }.toTypedArray())
         val heard = mutableListOf<Pair<Int, Int>>()
         val sink: UsageSink = { i, o -> heard += i to o }
         val p = LLMProvider.OPENAI
@@ -403,8 +423,7 @@ class CutAnswerRetryTest {
         service.scoreDocument(p, "k", "m", "claim", "title", "abstract", onUsage = sink)
         service.extractCitations(p, "k", "m", "claim", "title", "abstract", onUsage = sink)
         service.generateReport(p, "k", "m", "claim", listOf(LLMService.DocumentCitation("t", "passage")), onUsage = sink)
-        service.generateHypotheticalDocument(p, "k", "m", "claim", onUsage = sink)
 
-        assertEquals((1..6).map { 100 to it }, heard)
+        assertEquals((1..5).map { 100 to it }, heard)
     }
 }

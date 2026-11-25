@@ -186,7 +186,9 @@ a git pin). Snapshot rows keep `run_status`/`run_deciding` set-once.
   logged. **A cut answer with no text** (thinking took the limit) is asked
   again too, and still textless it fails naming its limit (#830; iOS
   `ReplyMessage`, `LLMError.cutBeforeWriting`; Android's nullable
-  `OpenAIChatMessage.content`).
+  `OpenAIChatMessage.content`). **A refusal** (`refusal`/`content_filter`)
+  fails as `LLMError.refused`/`RefusedError`, never retried, a retry's too
+  (#819, the desktop's rule); the HyDE prompts ask for no invented numbers.
 - **Every search query a fact check ran** (apps, PR #810): `SearchQueryLog`,
   Android Room 11 → 12; not yet seen on a device or simulator.
 - **Strict service JSON** (#781, #784): every service's JSON but esearch is
@@ -271,11 +273,9 @@ Open issues by family; each issue carries the detail. None blocks another.
   stage (spec §5) gets its own spec revision after that report. The shadow
   stage's parked follow-ups (untested paths, an unbounded queue, the wire
   contract fixture): **#815**.
-- **HyDE refusals (#819)**, from the #813 measurement. From #822's review:
-  **#829** a still-cut answer some apps parsers read as complete
-  (reader-facing: maintainer's call).
-  **#823** Haiku 5.5 refused 1 of 10 desktop quality assessments (read as
-  unclassified).
+- **#829** (#822's review) a still-cut answer some apps parsers read as
+  complete; **#823** a refused desktop quality assessment reads as
+  unclassified (both reader-facing: maintainer's call).
 - **From the bmlib syncs.** PR #757's issues are fixed and unreleased (a
   0.6.1 is the maintainer's call; PRs #765–#767, #771, #774, #775). Still
   deferred: #768, #769 (apps' Ollama), #770 (prompts ask for null), #773

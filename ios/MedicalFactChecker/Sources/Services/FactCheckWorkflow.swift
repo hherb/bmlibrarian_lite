@@ -3073,6 +3073,8 @@ final class FactCheckWorkflow {
     ///
     /// - Parameter claim: The medical claim to generate a hypothetical document for.
     /// - Returns: A hypothetical abstract text.
+    /// - Throws: `LLMError.emptyResponse` when the answer holds no text, so the
+    ///   caller scores against the claim, as for any other failure.
     private func generateHypotheticalDocument(for claim: String) async throws -> String {
         guard let llmService = llmService else {
             throw LLMError.invalidConfiguration("LLM service not initialized")
@@ -3091,7 +3093,15 @@ final class FactCheckWorkflow {
         // Record usage for budget tracking
         recordUsage(usage, operationType: "hyde_generation")
 
-        return response.trimmingCharacters(in: .whitespacesAndNewlines)
+        return try Self.hypotheticalDocument(fromAnswer: response)
+    }
+
+    /// The HyDE answer's text, trimmed; an empty one throws `LLMError.emptyResponse`:
+    /// embedded as the document it would score every paper against nothing (#819).
+    nonisolated static func hypotheticalDocument(fromAnswer answer: String) throws -> String {
+        let text = answer.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { throw LLMError.emptyResponse }
+        return text
     }
 
     /// Extract citations from relevant documents using parallel processing.

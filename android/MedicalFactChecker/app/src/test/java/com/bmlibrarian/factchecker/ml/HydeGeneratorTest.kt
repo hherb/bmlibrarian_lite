@@ -28,7 +28,9 @@ import io.mockk.mockk
 import io.mockk.slot
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class HydeGeneratorTest {
@@ -48,6 +50,24 @@ class HydeGeneratorTest {
 
         assertEquals(abstract, generated)
         assertEquals(Constants.LLM_HYDE_MAX_TOKENS, maxTokens.captured)
+    }
+
+    @Test
+    fun `the prompt asks for a search passage, not a study to invent`() = runTest {
+        // #819: asked for "a real published study" with statistics, Claude Haiku 5.5 refused 2 of 20
+        val llmService = mockk<LLMService>()
+        val system = slot<String>()
+        val user = slot<String>()
+        coEvery {
+            llmService.chat(any(), any(), any(), capture(system), capture(user), any(), any(), any(), any())
+        } returns Result.success(LLMResult("too short", 0, 0, "stop", "m"))
+
+        HydeGenerator(llmService).generateHypotheticalAbstract("Aspirin prevents stroke", LLMProvider.ANTHROPIC, "k", "m")
+
+        val prompt = (system.captured + user.captured).lowercase()
+        assertFalse(prompt.contains("real published"))
+        assertFalse(prompt.contains("with statistics"))
+        assertTrue(prompt.contains("without numbers"))
     }
 
     @Test

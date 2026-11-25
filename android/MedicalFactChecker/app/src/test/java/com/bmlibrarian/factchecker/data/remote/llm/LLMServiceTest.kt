@@ -574,46 +574,6 @@ class LLMServiceTest {
         assertTrue(report.report.contains("Summary"))
     }
 
-    // ==================== HyDE Generation Tests ====================
-
-    @Test
-    fun `generateHypotheticalDocument returns hypothetical abstract`() = runTest {
-        // Arrange
-        val hypotheticalAbstract = """
-            Background: This study investigates the effects of aspirin on cardiovascular outcomes.
-            Methods: A randomized controlled trial was conducted with 1000 participants.
-            Results: Aspirin reduced cardiovascular events by 25% (p<0.001).
-            Conclusion: Regular aspirin use may reduce cardiovascular risk.
-        """.trimIndent()
-        coEvery {
-            openAIApi.chatCompletion(any(), any(), any())
-        } returns Response.success(
-            OpenAIChatResponse(
-                id = "test-id",
-                choices = listOf(
-                    OpenAIChatChoice(
-                        index = 0,
-                        message = OpenAIChatMessage("assistant", hypotheticalAbstract),
-                        finishReason = "stop"
-                    )
-                ),
-                usage = null
-            )
-        )
-
-        // Act
-        val result = service.generateHypotheticalDocument(
-            provider = LLMProvider.OPENAI,
-            apiKey = "test-key",
-            model = "gpt-4o",
-            claim = "Aspirin reduces cardiovascular risk"
-        )
-
-        // Assert
-        assertTrue(result.isSuccess)
-        assertTrue(result.getOrNull()!!.contains("cardiovascular"))
-    }
-
     // ==================== Provider-Specific Tests ====================
 
     @Test

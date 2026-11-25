@@ -145,6 +145,18 @@ sealed class LLMError(
     ) : LLMError(message)
 
     /**
+     * The model declined to answer (a `refusal` or `content_filter` stop
+     * reason, #819), whatever text came with it, as the desktop's
+     * `RefusedResponseError`. Asked again it likely declines again, so it is
+     * never retried.
+     *
+     * @property message Error message (our own text, never the provider's)
+     */
+    data class RefusedError(
+        override val message: String
+    ) : LLMError(message)
+
+    /**
      * Unknown error - unexpected error condition.
      *
      * @property message Error message

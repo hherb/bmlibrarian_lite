@@ -282,4 +282,38 @@ struct CutAnswerRetryTests {
             Issue.record("a finished textless reply was read as an answer")
         } catch LLMError.emptyResponse {}
     }
+
+    // MARK: - #819: a refusal is a refusal
+
+    @Test func aRefusalThrowsAsOneWhateverTextCameWithItAndIsAskedOnce() async throws {
+        for reply in [
+            CutStubProtocol.Reply(content: nil, finishReason: "refusal"),
+            CutStubProtocol.Reply(content: "", finishReason: "content_filter"),
+            CutStubProtocol.Reply(content: "partial", finishReason: "refusal"),
+        ] {
+            do {
+                _ = try await service([reply]).chat(messages: [LLMService.userMessage("q")], maxTokens: 2048)
+                Issue.record("a refusal was returned as an answer")
+            } catch LLMError.refused {}
+            #expect(CutStubProtocol.maxTokens == [2048], "never retried")
+        }
+    }
+
+    @Test func anEmptyHydeAnswerFallsBackLikeAnyFailure() throws {
+        #expect(throws: LLMError.self) { try FactCheckWorkflow.hypotheticalDocument(fromAnswer: " \n ") }
+        #expect(try FactCheckWorkflow.hypotheticalDocument(fromAnswer: " A passage.\n") == "A passage.")
+    }
+
+    @Test func aCutAnswerWhoseRetryIsRefusedThrowsTheRefusal() async throws {
+        // the desktop raises the retry's refusal too, never keeping the cut answer
+        let llm = service([
+            .init(content: "cut", finishReason: "length", outputTokens: 2048),
+            .init(content: nil, finishReason: "refusal"),
+        ])
+        do {
+            _ = try await llm.chat(messages: [LLMService.userMessage("q")], maxTokens: 2048)
+            Issue.record("the cut answer was kept over a refusal")
+        } catch LLMError.refused {}
+        #expect(CutStubProtocol.maxTokens == [2048, 4096])
+    }
 }

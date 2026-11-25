@@ -136,7 +136,9 @@ actor LLMService {
     /// can pass the request timeout) is logged and the cut answer returned. A cut
     /// answer is returned as written, and its caller reads it as before (#829);
     /// one with no text (thinking took the limit) is asked again the same way,
-    /// and still textless it throws `LLMError.cutBeforeWriting` (#830).
+    /// and still textless it throws `LLMError.cutBeforeWriting` (#830). A reply
+    /// that declined to answer, the retry's too, throws `LLMError.refused`, never
+    /// retried (#819).
     ///
     /// - Parameters:
     ///   - messages: Array of chat messages.
@@ -169,6 +171,9 @@ actor LLMService {
         let retry: (content: String, usage: LLMUsage, finishReason: String?)
         do {
             retry = try await chatRetryingFailures(messages: messages, temperature: temperature, maxTokens: raised, attempts: 1)
+        } catch LLMError.refused {
+            // A refusal is an answer, not a failed request: the desktop raises it too
+            throw LLMError.refused
         } catch {
             try Task.checkCancellation()
             print("[LLMService] Asking \(model) once more with \(raised) failed (\(error.localizedDescription)); keeping the cut answer")
@@ -361,7 +366,8 @@ actor LLMService {
     /// - Parameter data: The 200 response's body.
     /// - Returns: The reply's text, its input and output tokens (0 when unstated)
     ///   and why it stopped.
-    /// - Throws: `LLMError.emptyResponse` when the reply holds no message, or no
+    /// - Throws: `LLMError.refused` when the model declined to answer (#819);
+    ///   `LLMError.emptyResponse` when the reply holds no message, or no
     ///   text and was not cut (a cut one with no text is an answer, asked again
     ///   by ``chat(messages:temperature:maxTokens:jsonMode:retryingCut:)``, #830),
     ///   or a `DecodingError` when the body is not the provider's reply shape.
@@ -370,6 +376,7 @@ actor LLMService {
         decoder.keyDecodingStrategy = .convertFromSnakeCase
         if provider == .ollama {
             let result = try decoder.decode(OllamaChatResponse.self, from: data)
+            try Self.requireAnswered(result.doneReason)
             let content = try Self.text(result.message?.content, finishReason: result.doneReason)
             return (content, result.promptEvalCount ?? 0, result.evalCount ?? 0, result.doneReason)
         }
@@ -377,8 +384,21 @@ actor LLMService {
         guard let choice = result.choices.first else {
             throw LLMError.emptyResponse
         }
+        try Self.requireAnswered(choice.finishReason)
         let content = try Self.text(choice.message?.content, finishReason: choice.finishReason)
         return (content, result.usage?.promptTokens ?? 0, result.usage?.completionTokens ?? 0, choice.finishReason)
+    }
+
+    /// Throws `LLMError.refused` when the model declined to answer (#819),
+    /// whatever text came with it, as the desktop's `RefusedResponseError`.
+    private static func requireAnswered(_ finishReason: String?) throws {
+        if isRefused(finishReason) { throw LLMError.refused }
+    }
+
+    /// Whether a finish reason says the model declined to answer: `refusal`
+    /// (Anthropic's native name) or `content_filter` (chat completions).
+    static func isRefused(_ finishReason: String?) -> Bool {
+        finishReason == "refusal" || finishReason == "content_filter"
     }
 
     /// A reply's text: none is `""` when the reply was cut, else `LLMError.emptyResponse`.
@@ -425,7 +445,7 @@ actor LLMService {
             case .invalidResponse, .emptyResponse:
                 // These might be transient issues
                 return true
-            case .invalidConfiguration, .parseError, .cutBeforeWriting:
+            case .invalidConfiguration, .parseError, .cutBeforeWriting, .refused:
                 // These won't be fixed by retrying
                 return false
             }
@@ -761,6 +781,8 @@ enum LLMError: LocalizedError {
     /// The answer reached its token limit before it wrote any text, after its
     /// retry with a larger limit where one was allowed (#830).
     case cutBeforeWriting(outputTokens: Int)
+    /// The model declined to answer (#819); asked again it likely declines again.
+    case refused
     case parseError(String)
 
     var errorDescription: String? {
@@ -777,6 +799,8 @@ enum LLMError: LocalizedError {
             return "Empty response from LLM API"
         case .cutBeforeWriting(let outputTokens):
             return "The answer reached its token limit (\(outputTokens) tokens) before it wrote anything"
+        case .refused:
+            return "The model declined to answer"
         case .parseError(let reason):
             return "Failed to parse LLM response: \(reason)"
         }

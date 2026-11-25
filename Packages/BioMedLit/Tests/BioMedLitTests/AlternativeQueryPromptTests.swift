@@ -38,3 +38,14 @@ final class AlternativeQueryPromptTests: XCTestCase {
         XCTAssertTrue(text.contains("- aspirin AND ischaemic stroke\n- salicylate AND cerebrovascular\n\nGenerate 2-3"))
     }
 }
+
+/// #819: the HyDE prompt asks for a search passage, not a study to invent.
+final class HydePromptTests: XCTestCase {
+    func testThePromptAsksForNoInventedStudyOrNumbers() {
+        let text = PromptTemplates.hydeGeneration(claim: "Aspirin prevents stroke").lowercased()
+        XCTAssertTrue(text.contains("aspirin prevents stroke"))
+        XCTAssertFalse(text.contains("real published"))
+        XCTAssertFalse(text.contains("with numbers"))
+        XCTAssertTrue(text.contains("without numbers"))
+    }
+}
