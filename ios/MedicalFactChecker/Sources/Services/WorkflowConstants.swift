@@ -42,6 +42,13 @@ enum WorkflowConstants {
     /// Most output tokens for a report.
     static let reportMaxTokens = 8192
 
+    /// What a cut answer's limit is multiplied by when it is asked once more
+    /// (#822, the desktop's #825): how long a model thinks varies from run to run.
+    static let cutAnswerRetryFactor = 2
+
+    /// The most output tokens a cut answer is asked again with, as on the desktop.
+    static let cutAnswerRetryMaxTokens = 16384
+
     // MARK: - Smart Search
 
     /// Minimum relevant documents before triggering smart search.

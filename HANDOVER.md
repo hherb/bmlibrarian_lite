@@ -180,7 +180,17 @@ a git pin). Snapshot rows keep `run_status`/`run_deciding` set-once.
   The interrogation agent's query expansion calls it directly. A retry that
   raises keeps the cut answer (Opus 4/4.1: the SDK refuses past 8192 without
   streaming). `LLMResponse.max_tokens` says the limit asked; None never
-  retries. The apps wait on #822.
+  retries. **The apps (#822)** do the same in each `LLMService.chat`
+  (`raisedLimit`, `WorkflowConstants.cutAnswerRetry*`,
+  `LLM_CUT_ANSWER_RETRY_*`): a cut is a `length` or `max_tokens` finish with
+  the whole limit generated; the retry is one attempt, never backed off (a
+  twice-as-long answer can pass the 120 s request timeout); no `room` cap, as
+  `num_ctx` is sized per request; the returned usage is both requests'
+  (Android still records estimates, #818); the connection test passes
+  `retryingCut: false`. A cut answer still left is returned as written and
+  only logged: no `cut_answers` record, no prose note. Deferred: #829 (some
+  parsers read a still-cut answer as complete), #830 (a cut answer with no
+  text is not raised).
 - **Every search query a fact check ran** (apps, PR #810): `SearchQueryLog`,
   Android Room 11 → 12; not yet seen on a device or simulator.
 - **Strict service JSON** (#781, #784): every service's JSON but esearch is
@@ -266,8 +276,9 @@ Open issues by family; each issue carries the detail. None blocks another.
   stage's parked follow-ups (untested paths, an unbounded queue, the wire
   contract fixture): **#815**.
 - **Android's real LLM usage (#818)** and **HyDE refusals (#819)**, from the
-  #813 measurement. **#822** neither app notices an answer cut at its limit
-  (then port #825's retry).
+  #813 measurement. From #822's review: **#829** a still-cut answer some
+  apps parsers read as complete (reader-facing: maintainer's call), **#830**
+  a cut answer with no text is not asked with a larger limit.
   **#823** Haiku 5.5 refused 1 of 10 desktop quality assessments (read as
   unclassified).
 - **From the bmlib syncs.** PR #757's issues are fixed and unreleased (a

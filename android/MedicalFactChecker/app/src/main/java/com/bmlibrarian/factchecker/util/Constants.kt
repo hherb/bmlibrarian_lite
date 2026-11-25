@@ -518,6 +518,15 @@ object Constants {
     /** Maximum tokens for a HyDE abstract (longest measured: 1,834). */
     const val LLM_HYDE_MAX_TOKENS = 4096
 
+    /**
+     * What a cut answer's limit is multiplied by when it is asked once more (#822,
+     * the desktop's #825): how long a model thinks varies from run to run.
+     */
+    const val LLM_CUT_ANSWER_RETRY_FACTOR = 2
+
+    /** The most output tokens a cut answer is asked again with, as on the desktop and iOS. */
+    const val LLM_CUT_ANSWER_RETRY_MAX_TOKENS = 16384
+
     // Output tokens recorded for each call: usage is estimated, not read from
     // the reply (#818), so these keep the figures recorded before the limits
     // were raised.
