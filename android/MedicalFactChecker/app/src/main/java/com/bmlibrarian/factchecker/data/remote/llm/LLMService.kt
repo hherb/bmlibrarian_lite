@@ -26,6 +26,8 @@ import com.bmlibrarian.factchecker.util.Constants
 import com.bmlibrarian.factchecker.util.NetworkRetry
 import com.bmlibrarian.factchecker.util.OllamaContext
 import com.bmlibrarian.factchecker.util.ResponseParser
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 import retrofit2.Response
@@ -61,7 +63,13 @@ class LLMService @Inject constructor(
      * @param userPrompt User message content
      * @param maxTokens Maximum tokens to generate
      * @param temperature Sampling temperature (0.0-2.0), for OpenAI-format providers and Ollama's `options`; never sent to Claude (#758)
-     * @return Result containing LLMResult on success, or LLMError on failure
+     * @param retryingCut False keeps the limit fixed (the connection test's ten tokens)
+     * @return Result containing LLMResult on success, or LLMError on failure. An
+     *   answer cut at its token limit is asked once more with the limit [raisedLimit]
+     *   allows (#822, the desktop's #825); the retry's answer is returned, cut or
+     *   not, with both requests' tokens. A retry that fails is logged and the cut
+     *   answer returned. A cut answer is still returned as written: a JSON one then
+     *   fails to parse at its caller, as before.
      */
     suspend fun chat(
         provider: LLMProvider,
@@ -70,7 +78,48 @@ class LLMService @Inject constructor(
         systemPrompt: String,
         userPrompt: String,
         maxTokens: Int = Constants.LLM_SCORING_MAX_TOKENS,
-        temperature: Double = Constants.LLM_DEFAULT_TEMPERATURE.toDouble()
+        temperature: Double = Constants.LLM_DEFAULT_TEMPERATURE.toDouble(),
+        retryingCut: Boolean = true
+    ): Result<LLMResult> {
+        val reply = chatRetryingFailures(provider, apiKey, model, systemPrompt, userPrompt, maxTokens, temperature)
+        val answer = reply.getOrNull() ?: return reply
+        val raised = raisedLimit(answer.finishReason, answer.outputTokens, maxTokens)
+        if (!retryingCut || raised == null) {
+            if (isCut(answer.finishReason)) {
+                Log.w(TAG, "The answer from $model stopped at its token limit (${answer.outputTokens} of $maxTokens tokens)")
+            }
+            return reply
+        }
+        Log.w(TAG, "The answer from $model reached its token limit ($maxTokens); asking once more with $raised")
+        val retried = chatRetryingFailures(provider, apiKey, model, systemPrompt, userPrompt, raised, temperature)
+        val retry = retried.getOrElse { e ->
+            currentCoroutineContext().ensureActive()
+            Log.w(TAG, "Asking $model once more with $raised failed (${e.message}); keeping the cut answer")
+            return reply
+        }
+        if (isCut(retry.finishReason)) {
+            Log.w(TAG, "The answer from $model reached its token limit again (${retry.outputTokens} of $raised tokens)")
+        }
+        return Result.success(
+            retry.copy(
+                inputTokens = answer.inputTokens + retry.inputTokens,
+                outputTokens = answer.outputTokens + retry.outputTokens
+            )
+        )
+    }
+
+    /**
+     * One answer, retried with exponential backoff for transient failures; a cut
+     * answer is returned as it is.
+     */
+    private suspend fun chatRetryingFailures(
+        provider: LLMProvider,
+        apiKey: String,
+        model: String,
+        systemPrompt: String,
+        userPrompt: String,
+        maxTokens: Int,
+        temperature: Double
     ): Result<LLMResult> {
         return try {
             NetworkRetry.withExponentialBackoff(
@@ -561,6 +610,35 @@ class LLMService @Inject constructor(
     companion object {
         /** Log tag for this service. */
         private const val TAG = "LLMService"
+
+        /**
+         * Whether a finish reason says the answer stopped at its token limit:
+         * `length` (chat completions, Ollama's `done_reason`) or `max_tokens`
+         * (Anthropic's native name).
+         */
+        internal fun isCut(finishReason: String?): Boolean =
+            finishReason == "length" || finishReason == "max_tokens"
+
+        /**
+         * The limit to ask a cut answer again with, or null not to ask again (#822),
+         * by the desktop's `cut_answers.raised_limit` rule. An answer that stopped
+         * short of its limit ran out of context window, which a larger limit does not
+         * change; a reply that states no token count cannot show it reached its limit.
+         *
+         * @param finishReason Why the answer stopped
+         * @param outputTokens The tokens it generated, thinking included
+         * @param maxTokens The limit it was asked with
+         * @return Twice the limit, capped at [Constants.LLM_CUT_ANSWER_RETRY_MAX_TOKENS];
+         *   null when the answer was not cut at its limit or no larger limit is allowed
+         */
+        internal fun raisedLimit(finishReason: String?, outputTokens: Int, maxTokens: Int): Int? {
+            if (!isCut(finishReason) || maxTokens <= 0 || outputTokens < maxTokens) return null
+            val raised = minOf(
+                maxTokens * Constants.LLM_CUT_ANSWER_RETRY_FACTOR,
+                Constants.LLM_CUT_ANSWER_RETRY_MAX_TOKENS
+            )
+            return raised.takeIf { it > maxTokens }
+        }
 
         /**
          * What a retry after an unreadable reply adds to its request (#761),

@@ -427,7 +427,8 @@ class SettingsViewModel @Inject constructor(
                     systemPrompt = "You are a helpful assistant.",
                     userPrompt = "Say 'OK' to confirm the connection works.",
                     maxTokens = 10,
-                    temperature = 0.0
+                    temperature = 0.0,
+                    retryingCut = false
                 )
 
                 if (result.isSuccess) {

@@ -129,20 +129,93 @@ actor LLMService {
     /// Send a chat completion request to the LLM with automatic retry.
     ///
     /// Retries up to `maxRetries` times with exponential backoff for transient failures
-    /// (network errors, rate limits, server errors).
+    /// (network errors, rate limits, server errors). An answer cut at its token
+    /// limit is asked once more with the limit ``raisedLimit(finishReason:outputTokens:maxTokens:)``
+    /// allows (#822, the desktop's #825), and the retry's answer is returned, cut
+    /// or not; a retry that fails is logged and the cut answer returned. A cut
+    /// answer is still returned as written: a JSON one then fails to parse at its
+    /// caller, as before.
     ///
     /// - Parameters:
     ///   - messages: Array of chat messages.
     ///   - temperature: Sampling temperature (0.0-2.0).
     ///   - maxTokens: Maximum tokens in response.
     ///   - jsonMode: Ignored - included for API compatibility. Request JSON in prompts instead.
-    /// - Returns: Tuple of (response content, usage statistics).
+    ///   - retryingCut: False keeps the limit fixed (the connection test's ten tokens).
+    /// - Returns: Tuple of (response content, usage statistics); after a cut
+    ///   answer's retry, the usage is both requests'.
     func chat(
         messages: [ChatMessage],
         temperature: Double = 0.1,
         maxTokens: Int = 1024,
-        jsonMode: Bool = false
+        jsonMode: Bool = false,
+        retryingCut: Bool = true
     ) async throws -> (content: String, usage: LLMUsage) {
+        let reply = try await chatRetryingFailures(messages: messages, temperature: temperature, maxTokens: maxTokens)
+        guard retryingCut,
+              let raised = Self.raisedLimit(
+                finishReason: reply.finishReason, outputTokens: reply.usage.outputTokens, maxTokens: maxTokens
+              )
+        else {
+            if Self.isCut(reply.finishReason) {
+                print("[LLMService] The answer from \(model) stopped at its token limit (\(reply.usage.outputTokens) of \(maxTokens) tokens)")
+            }
+            return (reply.content, reply.usage)
+        }
+        print("[LLMService] The answer from \(model) reached its token limit (\(maxTokens)); asking once more with \(raised)")
+        let retry: (content: String, usage: LLMUsage, finishReason: String?)
+        do {
+            retry = try await chatRetryingFailures(messages: messages, temperature: temperature, maxTokens: raised)
+        } catch {
+            try Task.checkCancellation()
+            print("[LLMService] Asking \(model) once more with \(raised) failed (\(error.localizedDescription)); keeping the cut answer")
+            return (reply.content, reply.usage)
+        }
+        if Self.isCut(retry.finishReason) {
+            print("[LLMService] The answer from \(model) reached its token limit again (\(retry.usage.outputTokens) of \(raised) tokens)")
+        }
+        let usage = LLMUsage(
+            model: model,
+            provider: provider,
+            inputTokens: reply.usage.inputTokens + retry.usage.inputTokens,
+            outputTokens: reply.usage.outputTokens + retry.usage.outputTokens
+        )
+        return (retry.content, usage)
+    }
+
+    /// Whether a finish reason says the answer stopped at its token limit:
+    /// `length` (chat completions, Ollama's `done_reason`) or `max_tokens`
+    /// (Anthropic's native name).
+    static func isCut(_ finishReason: String?) -> Bool {
+        finishReason == "length" || finishReason == "max_tokens"
+    }
+
+    /// The limit to ask a cut answer again with, or nil not to ask again (#822).
+    ///
+    /// The desktop's `cut_answers.raised_limit` rule. An answer that stopped
+    /// short of its limit ran out of context window, which a larger limit does
+    /// not change; a reply that states no token count cannot show it reached
+    /// its limit either.
+    ///
+    /// - Parameters:
+    ///   - finishReason: Why the answer stopped.
+    ///   - outputTokens: The tokens it generated, thinking included.
+    ///   - maxTokens: The limit it was asked with.
+    /// - Returns: Twice the limit, capped at `WorkflowConstants.cutAnswerRetryMaxTokens`;
+    ///   nil when the answer was not cut at its limit or no larger limit is allowed.
+    static func raisedLimit(finishReason: String?, outputTokens: Int, maxTokens: Int) -> Int? {
+        guard isCut(finishReason), maxTokens > 0, outputTokens >= maxTokens else { return nil }
+        let raised = min(maxTokens * WorkflowConstants.cutAnswerRetryFactor, WorkflowConstants.cutAnswerRetryMaxTokens)
+        return raised > maxTokens ? raised : nil
+    }
+
+    /// One answer, retried up to `maxRetries` times with exponential backoff
+    /// for transient failures; a cut answer is returned as it is.
+    private func chatRetryingFailures(
+        messages: [ChatMessage],
+        temperature: Double,
+        maxTokens: Int
+    ) async throws -> (content: String, usage: LLMUsage, finishReason: String?) {
         var lastError: Error?
 
         for attempt in 0..<Self.maxRetries {
@@ -179,7 +252,7 @@ actor LLMService {
         messages: [ChatMessage],
         temperature: Double,
         maxTokens: Int
-    ) async throws -> (content: String, usage: LLMUsage) {
+    ) async throws -> (content: String, usage: LLMUsage, finishReason: String?) {
         let endpoint = try chatEndpoint
 
         var request = URLRequest(url: endpoint)
@@ -227,7 +300,7 @@ actor LLMService {
         // Notify callback
         onUsageRecorded?(usage)
 
-        return (reply.content, usage)
+        return (reply.content, usage, reply.finishReason)
     }
 
     /// The URL chat requests are posted to.
@@ -270,10 +343,11 @@ actor LLMService {
     /// A successful reply's text and token counts.
     ///
     /// - Parameter data: The 200 response's body.
-    /// - Returns: The reply's text and its input and output tokens (0 when unstated).
+    /// - Returns: The reply's text, its input and output tokens (0 when unstated)
+    ///   and why it stopped.
     /// - Throws: `LLMError.emptyResponse` when the reply holds no message, or a
     ///   `DecodingError` when the body is not the provider's reply shape.
-    func decodeReply(_ data: Data) throws -> (content: String, inputTokens: Int, outputTokens: Int) {
+    func decodeReply(_ data: Data) throws -> (content: String, inputTokens: Int, outputTokens: Int, finishReason: String?) {
         let decoder = JSONDecoder()
         decoder.keyDecodingStrategy = .convertFromSnakeCase
         if provider == .ollama {
@@ -281,13 +355,13 @@ actor LLMService {
             guard let content = result.message?.content else {
                 throw LLMError.emptyResponse
             }
-            return (content, result.promptEvalCount ?? 0, result.evalCount ?? 0)
+            return (content, result.promptEvalCount ?? 0, result.evalCount ?? 0, result.doneReason)
         }
         let result = try decoder.decode(ChatCompletionResponse.self, from: data)
-        guard let content = result.choices.first?.message.content else {
+        guard let choice = result.choices.first else {
             throw LLMError.emptyResponse
         }
-        return (content, result.usage?.promptTokens ?? 0, result.usage?.completionTokens ?? 0)
+        return (choice.message.content, result.usage?.promptTokens ?? 0, result.usage?.completionTokens ?? 0, choice.finishReason)
     }
 
     // MARK: - Retry Helpers
@@ -477,7 +551,8 @@ actor LLMService {
         let (response, _) = try await service.chat(
             messages: [userMessage("Say 'OK' if you can read this.")],
             temperature: 0.0,
-            maxTokens: 10
+            maxTokens: 10,
+            retryingCut: false
         )
         return response
     }
