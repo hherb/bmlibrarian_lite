@@ -106,7 +106,7 @@ class LiteQueryConverter:
         Args:
             ask: Sends the prompt and returns the answer's text; raises when
                 the answer was cut off or refused, so it is never parsed as
-                complete (:meth:`SearchAgent.convert_ask`, #827)
+                complete (:meth:`LiteSearchAgent.convert_ask`, #827)
             model: Model string (e.g., "anthropic:claude-sonnet-4")
         """
         self.ask = ask
