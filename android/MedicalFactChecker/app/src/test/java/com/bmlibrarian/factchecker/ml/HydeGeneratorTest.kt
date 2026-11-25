@@ -54,7 +54,7 @@ class HydeGeneratorTest {
 
     @Test
     fun `the prompt asks for a search passage, not a study to invent`() = runTest {
-        // #819: asked for "a real published study" with statistics, Claude Haiku 5.5 refused 2 of 20
+        // #819: asked for "a real published study abstract" with statistics, Claude Haiku 5.5 refused 1 of 10
         val llmService = mockk<LLMService>()
         val system = slot<String>()
         val user = slot<String>()

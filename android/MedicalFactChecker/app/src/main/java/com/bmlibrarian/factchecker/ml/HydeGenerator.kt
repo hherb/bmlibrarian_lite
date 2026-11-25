@@ -38,7 +38,7 @@ import javax.inject.Singleton
  * Reference: Gao et al., "Precise Zero-Shot Dense Retrieval without Relevance Labels"
  *
  * Features:
- * - Generates synthetic scientific abstracts from medical claims
+ * - Generates a passage in the vocabulary of a scientific abstract from a medical claim
  * - Validates and cleans generated content
  * - Low additional cost (one LLM call per session)
  * - Can be cached and reused for smart search alternatives
@@ -53,8 +53,8 @@ class HydeGenerator @Inject constructor(
 
         /**
          * System prompt for HyDE passage generation. Worded as a search aid, not a
-         * study to invent: asked for "a real published study" with numbers, Claude
-         * Haiku 5.5 refused 2 of 20 (#819).
+         * study to invent: asked for "a real published study abstract" with
+         * statistics, Claude Haiku 5.5 refused 1 of 10 (#819).
          */
         private val SYSTEM_PROMPT = """
             You help search the biomedical literature. You write short passages in the
@@ -66,8 +66,8 @@ class HydeGenerator @Inject constructor(
     /**
      * Generate a hypothetical abstract that would address the given claim.
      *
-     * The generated abstract mimics the structure of real scientific abstracts
-     * and is used to improve embedding-based document retrieval.
+     * The passage uses an abstract's vocabulary, without numbers, and is used
+     * only to improve embedding-based document retrieval.
      *
      * @param claim The medical claim to generate a hypothetical abstract for
      * @param provider The LLM provider to use

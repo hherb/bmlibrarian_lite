@@ -39,6 +39,7 @@ import com.bmlibrarian.factchecker.data.repository.SettingsRepository
 import com.bmlibrarian.factchecker.data.repository.UsageRepository
 import com.bmlibrarian.factchecker.domain.embedding.EmbeddingService
 import com.bmlibrarian.factchecker.domain.model.EuropePMCQueryBuilder
+import com.bmlibrarian.factchecker.domain.model.LLMError
 import com.bmlibrarian.factchecker.domain.model.LLMProvider
 import com.bmlibrarian.factchecker.domain.model.NcbiCredentialsUnavailableException
 import com.bmlibrarian.factchecker.domain.model.PubMedQueryBuilder
@@ -150,6 +151,11 @@ class FactCheckWorkflow @Inject constructor(
         private const val SMART_SEARCH_UNUSABLE_MESSAGE =
             "Alternative searches could not be run: the language model's answers held no search query " +
                 "that could be used. Another model, chosen in Settings, may do better."
+
+        /** Shown when the model declined to propose alternative queries (the desktop's wording, #819). */
+        private const val SMART_SEARCH_REFUSED_MESSAGE =
+            "The model declined to propose alternative search queries, so no alternative search was run. " +
+                "Another model, chosen in Settings, may answer."
 
         /** Shown when a request for more evidence ran alternative queries that found no new documents. */
         const val NO_NEW_EVIDENCE_NOTICE =
@@ -559,6 +565,10 @@ class FactCheckWorkflow @Inject constructor(
                     }
                     SmartSearchOutcome.Unusable -> {
                         keepReportAfterFailedSearchForMore(session, SMART_SEARCH_UNUSABLE_MESSAGE)
+                        return
+                    }
+                    SmartSearchOutcome.Refused -> {
+                        keepReportAfterFailedSearchForMore(session, SMART_SEARCH_REFUSED_MESSAGE)
                         return
                     }
                     is SmartSearchOutcome.Ran -> outcome
@@ -1334,6 +1344,7 @@ class FactCheckWorkflow @Inject constructor(
                 when (val smartSearch = executeSmartSearch(updatedSession, config)) {
                     SmartSearchOutcome.Unavailable -> _searchFailureMessage.value = SMART_SEARCH_UNAVAILABLE_MESSAGE
                     SmartSearchOutcome.Unusable -> _searchFailureMessage.value = SMART_SEARCH_UNUSABLE_MESSAGE
+                    SmartSearchOutcome.Refused -> _searchFailureMessage.value = SMART_SEARCH_REFUSED_MESSAGE
                     is SmartSearchOutcome.Ran -> recordShortfalls(session.id, smartSearch.unrecordedShortfalls)
                 }
                 // Re-check after smart search
@@ -2336,6 +2347,9 @@ class FactCheckWorkflow @Inject constructor(
         /** Every answer the model gave, retries included, held no usable query; smart search is marked as tried. */
         data object Unusable : SmartSearchOutcome
 
+        /** The model declined to propose alternative queries (#819); smart search is marked as tried. */
+        data object Refused : SmartSearchOutcome
+
         /**
          * The alternative queries ran.
          *
@@ -2376,20 +2390,27 @@ class FactCheckWorkflow @Inject constructor(
         val triedQueries = triedAlternativeQueries(updatedSession).map { query ->
             query.concepts.joinToString(" AND ") { it.name }
         }
+        // Marked as tried, so the workflow does not ask and pay again on its
+        // own (a request for more evidence still runs a fresh round)
+        suspend fun markTried() = sessionRepository.updateSmartSearchState(
+            sessionId = session.id,
+            enabled = true,
+            queriesJson = updatedSession.alternativeQueriesJson,
+            fetchedPmids = updatedSession.fetchedPmids
+        )
         val alternatives = requestAlternativeQueries(updatedSession, config, relevantCount, triedQueries).getOrElse { error ->
+            if (error is LLMError.RefusedError) {
+                // Answered and paid for: asking the same model again would be refused again
+                Log.w(TAG, "Smart search's alternative queries were refused")
+                markTried()
+                return SmartSearchOutcome.Refused
+            }
             // Not marked as tried, so smart search can be tried again
             Log.e(TAG, "Smart search could not ask for alternative queries (${error.javaClass.simpleName})")
             return SmartSearchOutcome.Unavailable
         }
         if (alternatives.isEmpty()) {
-            // Marked as tried, so the workflow does not ask and pay again on its
-            // own (a request for more evidence still runs a fresh round)
-            sessionRepository.updateSmartSearchState(
-                sessionId = session.id,
-                enabled = true,
-                queriesJson = updatedSession.alternativeQueriesJson,
-                fetchedPmids = updatedSession.fetchedPmids
-            )
+            markTried()
             return SmartSearchOutcome.Unusable
         }
 
@@ -2484,7 +2505,7 @@ class FactCheckWorkflow @Inject constructor(
      * Ask the model for alternative queries, asking again while its answer holds none that can be used.
      *
      * Each answer is a paid call, so its usage is recorded and the budget checked
-     * before asking again; a request that failed reached no model and costs nothing.
+     * before asking again; a refused answer is paid for too, and is not asked again.
      *
      * @param session The current session
      * @param config Workflow configuration
@@ -2492,7 +2513,8 @@ class FactCheckWorkflow @Inject constructor(
      * @param triedQueries The alternative queries earlier rounds ran, each as its
      *   concept names joined by " AND "
      * @return The queries; an empty list when every answer, retries included, held
-     *   none; or a failure when the model could not be asked
+     *   none; or a failure when the model could not be asked, or declined to answer
+     *   ([LLMError.RefusedError])
      */
     private suspend fun requestAlternativeQueries(
         session: SessionEntity,

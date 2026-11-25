@@ -87,8 +87,9 @@ public enum PromptTemplates {
     /// abstract that would answer the claim, then using its embedding for
     /// comparison instead of the short claim text.
     ///
-    /// Worded as a search aid, not a study to invent: asked for "a real
-    /// published study" with numbers, Claude Haiku 5.5 refused some (#819).
+    /// Worded as a search aid, not a study to invent: Android's prompts, asking
+    /// alike for "a real published study" with numbers, were refused 2 of 20
+    /// times by Claude Haiku 5.5; none of iOS's 10 calls were (#819).
     ///
     /// - Parameter claim: The medical claim to generate a hypothetical abstract for.
     /// - Returns: Formatted prompt string.

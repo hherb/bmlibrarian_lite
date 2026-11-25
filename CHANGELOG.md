@@ -49,17 +49,20 @@ apps additionally carry their own store version tags (`swift_*`, `appstore_*`).
 ### Fixed
 
 - **Apps: a model's refusal is read as a refusal, and HyDE asks for less
-  (#819).** Claude Haiku 5.5 refused 2 of 20 of Android's HyDE prompts, which
-  asked for a realistic abstract "as if this were a real published study",
-  with invented numbers. Both apps now ask for a short passage of the kind
-  such an abstract would contain, in words and without numbers. A reply whose
-  stop reason is `refusal` or `content_filter` now fails as "The model …
-  declined to answer", whatever text came with it, and is never retried, as
-  on the desktop. Before, iOS retried it as an empty answer. A cut answer
-  whose retry is refused fails too. On iOS, an empty HyDE answer was embedded
-  as the document; it now falls back to the claim, like any other failure. On
-  Android, a refused answer to smart search's alternative-query prompt now
-  ends smart search instead of being asked again, as on iOS and the desktop.
+  (#819).** Claude Haiku 5.5 refused 2 of 20 of Android's HyDE calls. The
+  apps' prompts asked for a realistic abstract as if of a real published
+  study, with invented numbers. Both apps now ask for a short passage of the
+  kind such an abstract would contain, in words and without numbers. A reply
+  whose stop reason is `refusal` or `content_filter` now fails as a refusal
+  ("The model declined to answer"), whatever text came with it, and is never
+  retried, as on the desktop. Before, iOS retried it as an empty answer. A
+  cut answer whose retry is refused fails too. On iOS, an empty HyDE answer
+  was embedded as the document; it now falls back to the claim, like any
+  other failure. A refused answer to smart search's alternative-query prompt
+  now says the model declined, with the desktop's sentence, and marks smart
+  search as tried, so it is not asked and paid for again. Before, Android
+  asked again, and iOS told the user to check the model and its key. On iOS a
+  refused reply's tokens are not yet recorded (deferred: #834).
 - **Claude Haiku 5.5 no longer loses a third of its study-design
   classifications.** Haiku 5.5 thinks before it answers, and its thinking
   counts against the answer's token limit. At the classifier's limit of 256,

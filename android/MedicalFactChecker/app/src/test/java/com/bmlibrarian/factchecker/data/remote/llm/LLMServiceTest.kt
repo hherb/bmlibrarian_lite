@@ -785,6 +785,23 @@ class LLMServiceTest {
     }
 
     @Test
+    fun `a refused alternative-query answer is a refusal, not an unusable answer (#819)`() = runTest {
+        // An empty refusal must not read as an empty answer, which the workflow asks again
+        coEvery { openAIApi.chatCompletion(any(), any(), any()) } returns Response.success(
+            OpenAIChatResponse(
+                choices = listOf(
+                    OpenAIChatChoice(message = OpenAIChatMessage("assistant", ""), finishReason = "content_filter")
+                )
+            )
+        )
+
+        val result = generateAlternativeQueries()
+
+        assertTrue("got $result", result.exceptionOrNull() is LLMError.RefusedError)
+        coVerify(exactly = 1) { openAIApi.chatCompletion(any(), any(), any()) }
+    }
+
+    @Test
     fun `an alternative-query request that failed stays a failure`() = runTest {
         coEvery { openAIApi.chatCompletion(any(), any(), any()) } returns Response.error(401, "".toResponseBody(null))
 

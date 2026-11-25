@@ -275,7 +275,8 @@ class LLMService @Inject constructor(
      * @param onUsage Told each answered request's token counts (#818)
      * @return The alternative queries; an empty list when the model answered
      *   with no query that can be used, or with nothing, which asking again may
-     *   mend; or a failure when the request itself failed
+     *   mend; or a failure when the request itself failed, or the model declined
+     *   to answer ([LLMError.RefusedError], #819)
      */
     suspend fun generateAlternativeQueries(
         provider: LLMProvider,

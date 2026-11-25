@@ -37,6 +37,7 @@ import com.bmlibrarian.factchecker.data.repository.DocumentRepository
 import com.bmlibrarian.factchecker.data.repository.ReportRepository
 import com.bmlibrarian.factchecker.data.repository.SessionRepository
 import com.bmlibrarian.factchecker.data.repository.UsageRepository
+import com.bmlibrarian.factchecker.domain.model.LLMError
 import com.bmlibrarian.factchecker.domain.model.NcbiCredentialSource
 import com.bmlibrarian.factchecker.domain.model.NcbiCredentials
 import com.bmlibrarian.factchecker.domain.model.NcbiCredentialsUnavailableException
@@ -480,6 +481,30 @@ class FactCheckWorkflowSearchFailureTest {
         // Marked as tried, so no later batch asks and pays again
         coVerify { sessionRepository.updateSmartSearchState(SESSION_ID, true, null, null) }
         assertEquals(UNUSABLE_ANSWERS_MESSAGE, workflow.searchFailureMessage.value)
+        assertTrue("got ${workflow.state.value}", workflow.state.value is WorkflowState.Completed)
+    }
+
+    @Test
+    fun `a refused alternative-query answer marks smart search as tried and says the model declined (#819)`() = runTest {
+        holdSession(SearchProvider.PUBMED)
+        coEvery { documentRepository.getDocumentCount(SESSION_ID) } returns 0
+        pubMedFailsWith(429)
+        pubMedFinds("1") { it == "aspirin" }
+        coEvery { llmService.generateAlternativeQueries(any(), any(), any(), any(), any(), any(), any(), any(), any()) } returns
+            Result.failure(LLMError.RefusedError("The model claude declined to answer"))
+
+        workflow.resumeSession(SESSION_ID, smartSearchConfig())
+
+        // Asked once: the same model would refuse again, and each refusal is paid for
+        coVerify(exactly = 1) {
+            llmService.generateAlternativeQueries(any(), any(), any(), any(), any(), any(), any(), any(), any())
+        }
+        coVerify { sessionRepository.updateSmartSearchState(SESSION_ID, true, null, null) }
+        assertEquals(
+            "The model declined to propose alternative search queries, so no alternative search was run. " +
+                "Another model, chosen in Settings, may answer.",
+            workflow.searchFailureMessage.value
+        )
         assertTrue("got ${workflow.state.value}", workflow.state.value is WorkflowState.Completed)
     }
 

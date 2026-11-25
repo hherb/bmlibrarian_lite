@@ -188,7 +188,11 @@ a git pin). Snapshot rows keep `run_status`/`run_deciding` set-once.
   `ReplyMessage`, `LLMError.cutBeforeWriting`; Android's nullable
   `OpenAIChatMessage.content`). **A refusal** (`refusal`/`content_filter`)
   fails as `LLMError.refused`/`RefusedError`, never retried, a retry's too
-  (#819, the desktop's rule); the HyDE prompts ask for no invented numbers.
+  (#819, the desktop's rule); the HyDE prompts ask for no invented numbers. A
+  refused alternative-query answer marks smart search tried, with the desktop's
+  sentence (iOS `SmartSearchError.refused`, Android
+  `SmartSearchOutcome.Refused`); iOS does not yet record a refused reply's
+  tokens (deferred: #834).
 - **Every search query a fact check ran** (apps, PR #810): `SearchQueryLog`,
   Android Room 11 → 12; not yet seen on a device or simulator.
 - **Strict service JSON** (#781, #784): every service's JSON but esearch is
