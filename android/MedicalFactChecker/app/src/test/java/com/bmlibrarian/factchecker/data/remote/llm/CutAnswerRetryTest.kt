@@ -7,6 +7,7 @@
 package com.bmlibrarian.factchecker.data.remote.llm
 
 import android.util.Log
+import com.bmlibrarian.factchecker.domain.model.LLMError
 import com.bmlibrarian.factchecker.domain.model.LLMProvider
 import com.bmlibrarian.factchecker.util.OllamaContext
 import io.mockk.coEvery
@@ -18,10 +19,12 @@ import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
+import kotlinx.serialization.json.Json
 import okhttp3.ResponseBody.Companion.toResponseBody
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import retrofit2.Response
@@ -230,5 +233,113 @@ class CutAnswerRetryTest {
         assertNull(LLMService.raisedLimit(null, 2048, 2048))
         assertNull("no count stated", LLMService.raisedLimit("length", 0, 2048))
         assertNull(LLMService.raisedLimit("length", 0, 0))
+    }
+
+    // ==================== #830: a cut answer with no text ====================
+
+    private fun textless(finishReason: String, outputTokens: Int) = Response.success(
+        OpenAIChatResponse(
+            id = "x",
+            choices = listOf(OpenAIChatChoice(0, OpenAIChatMessage("assistant", null), finishReason)),
+            usage = OpenAITokenUsage(promptTokens = 100, completionTokens = outputTokens, totalTokens = 100 + outputTokens)
+        )
+    )
+
+    private fun assertCutBeforeWriting(result: Result<LLMResult>) {
+        val error = result.exceptionOrNull()
+        assertTrue("$error", error is LLMError.EmptyResponseError)
+        assertTrue(error!!.message!!, error.message!!.contains("before it wrote anything"))
+    }
+
+    @Test
+    fun `a reply's null content decodes`() {
+        val body = """{"id":"x","choices":[{"index":0,"message":{"role":"assistant","content":null},""" +
+            """"finish_reason":"length"}],"usage":{"prompt_tokens":1,"completion_tokens":2048,"total_tokens":2049}}"""
+
+        val reply = Json { ignoreUnknownKeys = true }.decodeFromString(OpenAIChatResponse.serializer(), body)
+
+        assertEquals("", LLMResult.fromOpenAI(reply)?.content)
+    }
+
+    @Test
+    fun `a textless cut answer is asked once more with twice the limit`() = runTest {
+        openAIReplies(textless("length", 2048), answer("{\"score\": 4}", "stop", 2300))
+
+        val result = ask().getOrThrow()
+
+        assertEquals("{\"score\": 4}", result.content)
+        assertEquals(listOf(2048, 4096), asked)
+        assertEquals(4348, result.outputTokens)
+    }
+
+    @Test
+    fun `a textless answer cut again fails, naming its limit`() = runTest {
+        openAIReplies(textless("length", 2048), textless("length", 4096))
+
+        assertCutBeforeWriting(ask())
+        assertEquals(listOf(2048, 4096), asked)
+    }
+
+    @Test
+    fun `a textless cut answer whose retry fails fails`() = runTest {
+        openAIReplies(textless("length", 2048), Response.error(400, """{"error":{"message":"refused"}}""".toResponseBody()))
+
+        assertCutBeforeWriting(ask())
+    }
+
+    @Test
+    fun `a textless cut answer not asked again fails`() = runTest {
+        openAIReplies(textless("length", 900), textless("length", 10))
+
+        assertCutBeforeWriting(ask())
+        assertCutBeforeWriting(ask(maxTokens = 10, retryingCut = false))
+        assertEquals(listOf(2048, 10), asked)
+    }
+
+    @Test
+    fun `a textless answer that was not cut stays an empty response, asked once`() = runTest {
+        openAIReplies(textless("stop", 300))
+
+        val error = ask().exceptionOrNull()
+
+        assertEquals(LLMError.EmptyResponseError(), error)
+        assertEquals(listOf(2048), asked)
+    }
+
+    @Test
+    fun `Anthropic's thinking-only max_tokens reply is asked again`() = runTest {
+        val limits = mutableListOf<Int>()
+        val queue = ArrayDeque(
+            listOf(
+                Triple(listOf(AnthropicContentBlock(type = "thinking")), "max_tokens", 2048),
+                Triple(listOf(AnthropicContentBlock(type = "text", text = "whole")), "end_turn", 3000)
+            )
+        )
+        coEvery { anthropicApi.createMessage(any(), any(), any(), any()) } answers {
+            limits += arg<AnthropicMessagesRequest>(3).maxTokens
+            val (blocks, stop, tokens) = queue.removeFirst()
+            Response.success(
+                AnthropicMessagesResponse(
+                    id = "msg", content = blocks, stopReason = stop,
+                    usage = AnthropicUsage(inputTokens = 100, outputTokens = tokens)
+                )
+            )
+        }
+
+        val result = service.chat(
+            provider = LLMProvider.ANTHROPIC, apiKey = "k", model = "claude", systemPrompt = "s", userPrompt = "u",
+            maxTokens = 2048
+        ).getOrThrow()
+
+        assertEquals("whole", result.content)
+        assertEquals(listOf(2048, 4096), limits)
+    }
+
+    @Test
+    fun `a textless reply is an answer only when it was cut`() {
+        assertEquals("", LLMResult.fromOllama(OllamaChatResponse(message = null, evalCount = 2048, doneReason = "length"))?.content)
+        assertNull(LLMResult.fromOllama(OllamaChatResponse(message = null, doneReason = "stop")))
+        assertNull(LLMResult.fromAnthropic(AnthropicMessagesResponse(content = emptyList(), stopReason = "end_turn")))
+        assertNull(LLMResult.fromAnthropic(AnthropicMessagesResponse(content = emptyList(), stopReason = "refusal")))
     }
 }

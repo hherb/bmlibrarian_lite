@@ -188,9 +188,12 @@ a git pin). Snapshot rows keep `run_status`/`run_deciding` set-once.
   `num_ctx` is sized per request; the returned usage is both requests'
   (Android still records estimates, #818); the connection test passes
   `retryingCut: false`. A cut answer still left is returned as written and
-  only logged: no `cut_answers` record, no prose note. Deferred: #829 (some
-  parsers read a still-cut answer as complete), #830 (a cut answer with no
-  text is not raised).
+  only logged: no `cut_answers` record, no prose note. **A cut answer with no
+  text** (thinking took the limit) is asked again too, and still textless it
+  fails naming its limit (#830: the reply decoders accept a textless reply
+  only when cut; iOS `ReplyMessage`, `LLMError.cutBeforeWriting`; Android's
+  `OpenAIChatMessage.content` is nullable, `EmptyResponseError`). Deferred:
+  #829 (some parsers read a still-cut answer as complete).
 - **Every search query a fact check ran** (apps, PR #810): `SearchQueryLog`,
   Android Room 11 → 12; not yet seen on a device or simulator.
 - **Strict service JSON** (#781, #784): every service's JSON but esearch is
@@ -277,8 +280,7 @@ Open issues by family; each issue carries the detail. None blocks another.
   contract fixture): **#815**.
 - **Android's real LLM usage (#818)** and **HyDE refusals (#819)**, from the
   #813 measurement. From #822's review: **#829** a still-cut answer some
-  apps parsers read as complete (reader-facing: maintainer's call), **#830**
-  a cut answer with no text is not asked with a larger limit.
+  apps parsers read as complete (reader-facing: maintainer's call).
   **#823** Haiku 5.5 refused 1 of 10 desktop quality assessments (read as
   unclassified).
 - **From the bmlib syncs.** PR #757's issues are fixed and unreleased (a

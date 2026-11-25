@@ -13,7 +13,8 @@ import Testing
 private final class CutStubProtocol: URLProtocol {
     struct Reply {
         var status = 200
-        var content = "answer"
+        /// Nil is sent as `null`: the model wrote no text (#830).
+        var content: String? = "answer"
         var finishReason = "stop"
         var outputTokens = 5
         /// Never answers: the request ends only when it is cancelled.
@@ -35,7 +36,7 @@ private final class CutStubProtocol: URLProtocol {
         Self.maxTokens.append((ollama ? options?["num_predict"] : sent["max_tokens"]) as? Int ?? 0)
         let reply = Self.replies[min(Self.maxTokens.count, Self.replies.count) - 1]
         if reply.hangs { return }
-        let message: [String: Any] = ["role": "assistant", "content": reply.content]
+        let message: [String: Any] = ["role": "assistant", "content": reply.content ?? NSNull()]
         let choice: [String: Any] = ["message": message, "finish_reason": reply.finishReason]
         let usage: [String: Any] = [
             "prompt_tokens": 100, "completion_tokens": reply.outputTokens, "total_tokens": 100 + reply.outputTokens,
@@ -211,5 +212,74 @@ struct CutAnswerRetryTests {
         #expect(LLMService.raisedLimit(finishReason: nil, outputTokens: 2048, maxTokens: 2048) == nil)
         #expect(LLMService.raisedLimit(finishReason: "length", outputTokens: 0, maxTokens: 2048) == nil, "no count stated")
         #expect(LLMService.raisedLimit(finishReason: "length", outputTokens: 0, maxTokens: 0) == nil)
+    }
+
+    // MARK: - #830: a cut answer with no text
+
+    @Test func aTextlessCutAnswerIsAskedOnceMoreWithTwiceTheLimit() async throws {
+        let llm = service([
+            .init(content: nil, finishReason: "length", outputTokens: 2048),
+            .init(content: "{\"score\": 4}", outputTokens: 2300),
+        ])
+        let (content, usage) = try await llm.chat(messages: [LLMService.userMessage("q")], maxTokens: 2048)
+        #expect(content == "{\"score\": 4}")
+        #expect(CutStubProtocol.maxTokens == [2048, 4096])
+        #expect(usage.outputTokens == 4348)
+    }
+
+    @Test func anEmptyCutAnswerIsAskedAgainToo() async throws {
+        // Ollama and some compatible endpoints send "" rather than null
+        let llm = service(
+            [.init(content: "", finishReason: "length", outputTokens: 2048), .init(content: "whole", outputTokens: 3000)],
+            provider: .ollama
+        )
+        let (content, _) = try await llm.chat(messages: [LLMService.userMessage("q")], maxTokens: 2048)
+        #expect(content == "whole")
+        #expect(CutStubProtocol.maxTokens == [2048, 4096])
+    }
+
+    @Test func aTextlessAnswerCutAgainThrowsNamingItsLimit() async throws {
+        let llm = service([
+            .init(content: nil, finishReason: "length", outputTokens: 2048),
+            .init(content: nil, finishReason: "length", outputTokens: 4096),
+        ])
+        await #expect(throws: LLMError.self) {
+            _ = try await llm.chat(messages: [LLMService.userMessage("q")], maxTokens: 2048)
+        }
+        #expect(CutStubProtocol.maxTokens == [2048, 4096])
+        do {
+            _ = try await service([.init(content: nil, finishReason: "length", outputTokens: 4096)])
+                .chat(messages: [LLMService.userMessage("q")], maxTokens: 4096, retryingCut: false)
+            Issue.record("a textless cut answer was returned as an answer")
+        } catch let LLMError.cutBeforeWriting(outputTokens) {
+            #expect(outputTokens == 4096)
+        }
+    }
+
+    @Test func aTextlessCutAnswerWhoseRetryFailsThrows() async throws {
+        let llm = service([.init(content: nil, finishReason: "length", outputTokens: 2048), .init(status: 400)])
+        await #expect(throws: LLMError.self) {
+            _ = try await llm.chat(messages: [LLMService.userMessage("q")], maxTokens: 2048)
+        }
+        #expect(CutStubProtocol.maxTokens == [2048, 4096])
+    }
+
+    @Test func aTextlessCutAnswerShortOfItsLimitThrowsUnasked() async throws {
+        let llm = service([.init(content: nil, finishReason: "length", outputTokens: 900)])
+        await #expect(throws: LLMError.self) {
+            _ = try await llm.chat(messages: [LLMService.userMessage("q")], maxTokens: 2048)
+        }
+        #expect(CutStubProtocol.maxTokens == [2048])
+    }
+
+    @Test func aTextlessReplyIsAnAnswerOnlyWhenCut() async throws {
+        let llm = service([])
+        let cut = Data(#"{"choices":[{"message":{"role":"assistant","content":null},"finish_reason":"length"}]}"#.utf8)
+        #expect(try await llm.decodeReply(cut).content == "")
+        let finished = Data(#"{"choices":[{"message":{"role":"assistant","content":null},"finish_reason":"stop"}]}"#.utf8)
+        do {
+            _ = try await llm.decodeReply(finished)
+            Issue.record("a finished textless reply was read as an answer")
+        } catch LLMError.emptyResponse {}
     }
 }

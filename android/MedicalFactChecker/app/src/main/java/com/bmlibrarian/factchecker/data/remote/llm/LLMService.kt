@@ -70,7 +70,8 @@ class LLMService @Inject constructor(
      *   not, with both requests' tokens. The retry is one attempt: one that fails
      *   (a twice-as-long answer can pass the read timeout) is logged and the cut
      *   answer returned. A cut answer is returned as written, and its caller reads
-     *   it as before (#829).
+     *   it as before (#829); one with no text (thinking took the limit) is asked
+     *   again the same way, and still textless it fails (#830).
      */
     suspend fun chat(
         provider: LLMProvider,
@@ -89,22 +90,37 @@ class LLMService @Inject constructor(
             if (isCut(answer.finishReason)) {
                 Log.w(TAG, "The answer from $model stopped at a length limit, not asked again (${answer.outputTokens} of $maxTokens tokens)")
             }
-            return reply
+            return written(reply, model)
         }
         Log.w(TAG, "The answer from $model reached its token limit ($maxTokens); asking once more with $raised")
         val retried = chatRetryingFailures(provider, apiKey, model, systemPrompt, userPrompt, raised, temperature, retries = 0)
         val retry = retried.getOrElse { e ->
             currentCoroutineContext().ensureActive()
             Log.w(TAG, "Asking $model once more with $raised failed (${e.message}); keeping the cut answer")
-            return reply
+            return written(reply, model)
         }
         if (isCut(retry.finishReason)) {
             Log.w(TAG, "The answer from $model reached its token limit again (${retry.outputTokens} of $raised tokens)")
         }
-        return Result.success(
-            retry.copy(
-                inputTokens = answer.inputTokens + retry.inputTokens,
-                outputTokens = answer.outputTokens + retry.outputTokens
+        return written(retried, model).map {
+            it.copy(
+                inputTokens = answer.inputTokens + it.inputTokens,
+                outputTokens = answer.outputTokens + it.outputTokens
+            )
+        }
+    }
+
+    /**
+     * [reply], or a failure when it was cut before it wrote any text (#830): with
+     * nothing written there is no answer to keep, as the desktop's `_chat` raises
+     * `TruncatedResponseError`.
+     */
+    private fun written(reply: Result<LLMResult>, model: String): Result<LLMResult> {
+        val answer = reply.getOrNull() ?: return reply
+        if (answer.content.isNotEmpty() || !isCut(answer.finishReason)) return reply
+        return Result.failure(
+            LLMError.EmptyResponseError(
+                "The answer from $model reached its token limit (${answer.outputTokens} tokens) before it wrote anything"
             )
         )
     }

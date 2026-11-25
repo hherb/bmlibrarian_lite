@@ -75,8 +75,11 @@ data class ThinkingConfig(
 data class OpenAIChatMessage(
     /** Role: "system", "user", or "assistant". */
     val role: String,
-    /** Message content. */
-    val content: String
+    /**
+     * Message content. A request's is always set; a reply's is null when the
+     * model wrote no text (a thinking model can spend its whole limit thinking, #830).
+     */
+    val content: String?
 )
 
 /**
@@ -450,11 +453,14 @@ data class LLMResult(
 ) {
     companion object {
         /**
-         * Create LLMResult from OpenAI response.
+         * Create LLMResult from OpenAI response; null when it holds no answer.
+         * An answer cut at its limit with no text is one (#830): [LLMService.chat]
+         * asks it again with a larger limit.
          */
         fun fromOpenAI(response: OpenAIChatResponse): LLMResult? {
             val choice = response.choices.firstOrNull() ?: return null
-            val content = choice.message?.content ?: return null
+            val content = choice.message?.content
+                ?: if (LLMService.isCut(choice.finishReason)) "" else return null
 
             return LLMResult(
                 content = content,
@@ -466,10 +472,12 @@ data class LLMResult(
         }
 
         /**
-         * Create LLMResult from an Ollama native chat reply.
+         * Create LLMResult from an Ollama native chat reply; null when it holds no
+         * answer (a cut one with no text is one, as in [fromOpenAI]).
          */
         fun fromOllama(response: OllamaChatResponse): LLMResult? {
-            val content = response.message?.content ?: return null
+            val content = response.message?.content
+                ?: if (LLMService.isCut(response.doneReason)) "" else return null
 
             return LLMResult(
                 content = content,
@@ -481,7 +489,9 @@ data class LLMResult(
         }
 
         /**
-         * Create LLMResult from Anthropic response.
+         * Create LLMResult from Anthropic response; null when it holds no text,
+         * unless it stopped at `max_tokens` (thinking took the limit, #830), as in
+         * [fromOpenAI].
          */
         fun fromAnthropic(response: AnthropicMessagesResponse): LLMResult? {
             val textContent = response.content
@@ -489,7 +499,7 @@ data class LLMResult(
                 .mapNotNull { it.text }
                 .joinToString("")
 
-            if (textContent.isEmpty()) return null
+            if (textContent.isEmpty() && !LLMService.isCut(response.stopReason)) return null
 
             return LLMResult(
                 content = textContent,
