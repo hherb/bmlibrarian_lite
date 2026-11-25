@@ -134,7 +134,9 @@ actor LLMService {
     /// allows (#822, the desktop's #825), and the retry's answer is returned, cut
     /// or not. The retry is one attempt: one that fails (a twice-as-long answer
     /// can pass the request timeout) is logged and the cut answer returned. A cut
-    /// answer is returned as written, and its caller reads it as before (#829).
+    /// answer is returned as written, and its caller reads it as before (#829);
+    /// one with no text (thinking took the limit) is asked again the same way,
+    /// and still textless it throws `LLMError.cutBeforeWriting` (#830).
     ///
     /// - Parameters:
     ///   - messages: Array of chat messages.
@@ -160,6 +162,7 @@ actor LLMService {
             if Self.isCut(reply.finishReason) {
                 print("[LLMService] The answer from \(model) stopped at a length limit, not asked again (\(reply.usage.outputTokens) of \(maxTokens) tokens)")
             }
+            try Self.requireWritten(reply)
             return (reply.content, reply.usage)
         }
         print("[LLMService] The answer from \(model) reached its token limit (\(maxTokens)); asking once more with \(raised)")
@@ -169,11 +172,13 @@ actor LLMService {
         } catch {
             try Task.checkCancellation()
             print("[LLMService] Asking \(model) once more with \(raised) failed (\(error.localizedDescription)); keeping the cut answer")
+            try Self.requireWritten(reply)
             return (reply.content, reply.usage)
         }
         if Self.isCut(retry.finishReason) {
             print("[LLMService] The answer from \(model) reached its token limit again (\(retry.usage.outputTokens) of \(raised) tokens)")
         }
+        try Self.requireWritten(retry)
         let usage = LLMUsage(
             model: model,
             provider: provider,
@@ -181,6 +186,15 @@ actor LLMService {
             outputTokens: reply.usage.outputTokens + retry.usage.outputTokens
         )
         return (retry.content, usage)
+    }
+
+    /// Throws when `reply` was cut before it wrote any text (#830): with nothing
+    /// written there is no answer to keep, as the desktop's `_chat` raises
+    /// `TruncatedResponseError`.
+    private static func requireWritten(_ reply: (content: String, usage: LLMUsage, finishReason: String?)) throws {
+        if reply.content.isEmpty && isCut(reply.finishReason) {
+            throw LLMError.cutBeforeWriting(outputTokens: reply.usage.outputTokens)
+        }
     }
 
     /// Whether a finish reason says the answer stopped at its token limit:
@@ -347,23 +361,31 @@ actor LLMService {
     /// - Parameter data: The 200 response's body.
     /// - Returns: The reply's text, its input and output tokens (0 when unstated)
     ///   and why it stopped.
-    /// - Throws: `LLMError.emptyResponse` when the reply holds no message, or a
-    ///   `DecodingError` when the body is not the provider's reply shape.
+    /// - Throws: `LLMError.emptyResponse` when the reply holds no message, or no
+    ///   text and was not cut (a cut one with no text is an answer, asked again
+    ///   by ``chat(messages:temperature:maxTokens:jsonMode:retryingCut:)``, #830),
+    ///   or a `DecodingError` when the body is not the provider's reply shape.
     func decodeReply(_ data: Data) throws -> (content: String, inputTokens: Int, outputTokens: Int, finishReason: String?) {
         let decoder = JSONDecoder()
         decoder.keyDecodingStrategy = .convertFromSnakeCase
         if provider == .ollama {
             let result = try decoder.decode(OllamaChatResponse.self, from: data)
-            guard let content = result.message?.content else {
-                throw LLMError.emptyResponse
-            }
+            let content = try Self.text(result.message?.content, finishReason: result.doneReason)
             return (content, result.promptEvalCount ?? 0, result.evalCount ?? 0, result.doneReason)
         }
         let result = try decoder.decode(ChatCompletionResponse.self, from: data)
         guard let choice = result.choices.first else {
             throw LLMError.emptyResponse
         }
-        return (choice.message.content, result.usage?.promptTokens ?? 0, result.usage?.completionTokens ?? 0, choice.finishReason)
+        let content = try Self.text(choice.message?.content, finishReason: choice.finishReason)
+        return (content, result.usage?.promptTokens ?? 0, result.usage?.completionTokens ?? 0, choice.finishReason)
+    }
+
+    /// A reply's text: none is `""` when the reply was cut, else `LLMError.emptyResponse`.
+    private static func text(_ content: String?, finishReason: String?) throws -> String {
+        if let content { return content }
+        guard isCut(finishReason) else { throw LLMError.emptyResponse }
+        return ""
     }
 
     // MARK: - Retry Helpers
@@ -403,7 +425,7 @@ actor LLMService {
             case .invalidResponse, .emptyResponse:
                 // These might be transient issues
                 return true
-            case .invalidConfiguration, .parseError:
+            case .invalidConfiguration, .parseError, .cutBeforeWriting:
                 // These won't be fixed by retrying
                 return false
             }
@@ -573,6 +595,14 @@ struct ChatMessage: Codable, Sendable {
     let content: String
 }
 
+/// A reply's message. Its content is nil when the model wrote no text (a
+/// thinking model can spend its whole limit thinking, #830); a request's
+/// ``ChatMessage`` always has one.
+struct ReplyMessage: Codable {
+    /// The text the model wrote.
+    let content: String?
+}
+
 /// Request body for chat completions endpoint.
 ///
 /// Conforms to the OpenAI chat completions API specification.
@@ -623,7 +653,7 @@ struct ChatCompletionResponse: Codable {
 /// A single choice from the completion response.
 struct Choice: Codable {
     /// The generated message.
-    let message: ChatMessage
+    let message: ReplyMessage?
 
     /// Reason the generation stopped: "stop", "length", etc.
     let finishReason: String?
@@ -665,7 +695,7 @@ struct OllamaOptions: Codable {
 /// Reply from Ollama's native `/api/chat` (non-streamed).
 struct OllamaChatResponse: Codable {
     /// The generated message.
-    let message: ChatMessage?
+    let message: ReplyMessage?
 
     /// Tokens Ollama read from the prompt.
     let promptEvalCount: Int?
@@ -728,6 +758,9 @@ enum LLMError: LocalizedError {
     case httpError(statusCode: Int)
     case apiError(statusCode: Int, message: String)
     case emptyResponse
+    /// The answer reached its token limit before it wrote any text, after its
+    /// retry with a larger limit where one was allowed (#830).
+    case cutBeforeWriting(outputTokens: Int)
     case parseError(String)
 
     var errorDescription: String? {
@@ -742,6 +775,8 @@ enum LLMError: LocalizedError {
             return "API error \(code): \(message)"
         case .emptyResponse:
             return "Empty response from LLM API"
+        case .cutBeforeWriting(let outputTokens):
+            return "The answer reached its token limit (\(outputTokens) tokens) before it wrote anything"
         case .parseError(let reason):
             return "Failed to parse LLM response: \(reason)"
         }
