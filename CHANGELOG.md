@@ -69,8 +69,16 @@ apps additionally carry their own store version tags (`swift_*`, `appstore_*`).
   conversion, 4096 for alternative queries, a HyDE abstract and citations,
   and 8192 for a report. Scores and query conversions rise from 512
   (Android's scores from 500); Android's citations rise from 1000 and its
-  report from 2000. Only the tokens generated are billed, and Android's
-  recorded usage figures do not change (#818).
+  report from 2000. Only the tokens generated are billed.
+- **Android records each LLM call's real token usage (#818).** Usage was
+  estimated before: input at 4 characters a token, and output as a fixed
+  figure per call (256 for queries, 250 for a score or HyDE abstract, 500 for
+  a citation window, 2000 for a report). The usage screen, run costs and the
+  run budget now read the token counts each reply states, thinking included.
+  An unreadable reply that is asked again is counted too, as are a cut
+  answer's retry and an empty or refused reply: all were paid for. On Claude
+  5.5 an alternative-queries call was recorded as 256 tokens but generates
+  about 1,000–1,300.
 - **An answer cut at its token limit is asked once more with twice the
   limit (#825 desktop, #822 apps).** Only an answer that generated its whole
   limit is asked again, capped at 16,384 tokens. An answer cut short of its

@@ -19,8 +19,8 @@
 package com.bmlibrarian.factchecker.domain.workflow
 
 import com.bmlibrarian.factchecker.data.remote.llm.LLMService
+import com.bmlibrarian.factchecker.data.remote.llm.TokenTally
 import com.bmlibrarian.factchecker.domain.model.LLMProvider
-import com.bmlibrarian.factchecker.util.Constants
 import com.bmlibrarian.factchecker.util.TextWindows
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -171,16 +171,10 @@ class ParallelCitationService @Inject constructor(
     ): CitationResult {
         val windows = input.windows
         val extractions = mutableListOf<LLMService.CitationExtraction>()
-        var inputTokens = 0
-        var outputTokens = 0
-        var cost = 0.0
+        // Every window's reply is paid for, an unreadable one too (#818)
+        val tokens = TokenTally()
+        val cost = { modelInfo?.calculateCost(tokens.inputTokens, tokens.outputTokens) ?: 0.0 }
         for ((index, window) in windows.withIndex()) {
-            val estimatedInput = ParallelScoringService.estimateTokens(claim + input.title + window)
-            val estimatedOutput = Constants.LLM_CITATION_OUTPUT_ESTIMATE
-            inputTokens += estimatedInput
-            outputTokens += estimatedOutput
-            cost += modelInfo?.calculateCost(estimatedInput, estimatedOutput) ?: 0.0
-
             val result = llmService.extractCitations(
                 provider = provider,
                 apiKey = apiKey,
@@ -189,7 +183,8 @@ class ParallelCitationService @Inject constructor(
                 title = input.title,
                 content = window.ifEmpty { null },
                 part = index + 1,
-                parts = windows.size
+                parts = windows.size,
+                onUsage = tokens::add
             )
             val error = result.exceptionOrNull()
             if (error != null) {
@@ -198,9 +193,9 @@ class ParallelCitationService @Inject constructor(
                     pmid = input.pmid,
                     error = error,
                     isRetryable = ParallelScoringService.isRetryableError(error),
-                    inputTokens = inputTokens,
-                    outputTokens = outputTokens,
-                    costUsd = cost
+                    inputTokens = tokens.inputTokens,
+                    outputTokens = tokens.outputTokens,
+                    costUsd = cost()
                 )
             }
             extractions += result.getOrThrow()
@@ -209,9 +204,9 @@ class ParallelCitationService @Inject constructor(
             documentId = input.documentId,
             pmid = input.pmid,
             extractions = TextWindows.mergedWindowItems(extractions) { it.passage },
-            inputTokens = inputTokens,
-            outputTokens = outputTokens,
-            costUsd = cost
+            inputTokens = tokens.inputTokens,
+            outputTokens = tokens.outputTokens,
+            costUsd = cost()
         )
     }
 

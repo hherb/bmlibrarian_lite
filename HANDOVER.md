@@ -154,46 +154,39 @@ a git pin). Snapshot rows keep `run_status`/`run_deciding` set-once.
 
 ## Recently landed (context)
 
-- **MANTA-4B shadow stage** (`tools/manta_server/`, started per its
-  `README.md`): with `manta.url` (desktop) or *Settings → LLM → MANTA* (macOS,
-  localhost URLs only) set, MANTA judges every LLM-scored paper in the
-  background, stored per paper (`manta_judgements`, `Document.manta*`).
-- **MANTA benchmark** (PRs #812, #814; `doc/developer/manta_benchmark/README.md`).
-  Design: MANTA-4B 89 %, the Haiku 5.5 classifier 84 %, bmlib's rules 39 %
-  (MANTA calibrated, Haiku overconfident). Relevance: MANTA-4B ranks as well
-  as the Sonnet 5.5 scorer (ρ 0.617 / 0.619). Adopting MANTA is the
-  maintainer's call. **Thinking counts against `max_tokens`** (Haiku 5.5
-  thinks by default, iOS's endpoint too). **Limits, measured on the apps
-  (#813) and the desktop (#821):** 2048 a score/query/classification, 4096
-  alternative queries (outgrew 1024 even without thinking), HyDE, citations,
-  quality assessment, brief summary, 8192 a report; desktop
+- **MANTA-4B shadow stage** (`tools/manta_server/README.md`): with a MANTA URL
+  set (macOS: localhost only), every LLM-scored paper is judged in the
+  background (`manta_judgements`, `Document.manta*`). **Benchmark** (PRs #812,
+  #814; `doc/developer/manta_benchmark/README.md`). Design: MANTA-4B 89 %, the
+  Haiku 5.5 classifier 84 %, bmlib's rules 39 % (MANTA calibrated, Haiku
+  overconfident). Relevance: MANTA-4B ranks as well as the Sonnet 5.5 scorer
+  (ρ 0.617 / 0.619). Adopting MANTA is the maintainer's call. **Thinking
+  counts against `max_tokens`**. **Limits, measured on the apps (#813) and the
+  desktop (#821):** 2048 a score/query/classification, 4096 alternative
+  queries (outgrew 1024 even without thinking), HyDE, citations, quality
+  assessment, brief summary, 8192 a report; desktop
   `SHORT_ANSWER_`/`GENERATION_`/`REPORT_MAX_TOKENS`, measured maxima in
-  `tests/test_token_limits.py`. Open: #818, #819.
-- **A cut answer is asked once more with twice the limit** (desktop, #825):
-  only one that generated its whole limit (short of it, the context window
-  ran out), capped at `CUT_ANSWER_RETRY_MAX_TOKENS` 16384 (the SDK refuses
-  a non-streaming request past ~21k), and on Ollama only within a configured
-  `context_window`. In `_chat`/`_chat_prose` (`_chat_response_retrying_cut`),
-  never `_chat_response`; the benchmarks call the client, so keep fixed
-  limits. Every cut goes to SQLite `cut_answers` through the process-wide
-  `cut_answers.set_recorder` (the GUI and MCP server set it; tests reset it).
-  The interrogation agent's query expansion calls it directly. A retry that
-  raises keeps the cut answer (Opus 4/4.1: the SDK refuses past 8192 without
-  streaming). `LLMResponse.max_tokens` says the limit asked; None never
-  retries. **The apps (#822)** do the same in each `LLMService.chat`
-  (`raisedLimit`, `WorkflowConstants.cutAnswerRetry*`,
-  `LLM_CUT_ANSWER_RETRY_*`): a cut is a `length` or `max_tokens` finish with
-  the whole limit generated; the retry is one attempt, never backed off (a
-  twice-as-long answer can pass the 120 s request timeout); no `room` cap, as
-  `num_ctx` is sized per request; the returned usage is both requests'
-  (Android still records estimates, #818); the connection test passes
-  `retryingCut: false`. A cut answer still left is returned as written and
-  only logged: no `cut_answers` record, no prose note. **A cut answer with no
-  text** (thinking took the limit) is asked again too, and still textless it
-  fails naming its limit (#830: the reply decoders accept a textless reply
-  only when cut; iOS `ReplyMessage`, `LLMError.cutBeforeWriting`; Android's
-  `OpenAIChatMessage.content` is nullable, `EmptyResponseError`). Deferred:
-  #829 (some parsers read a still-cut answer as complete).
+  `tests/test_token_limits.py`. Open: #819. **Android records the replies' own
+  token counts** (#818): every `LLMService` call takes an `onUsage` sink
+  (`TokenTally::add`), told each paid request's tokens: an unparsed reply, a
+  cut answer's retry and an empty or refused reply (`LLMResult.holdsAnswer`
+  false) included; a request stating none records no row.
+- **A cut answer is asked once more with twice the limit** (desktop #825, apps
+  #822): only one that generated its whole limit, capped at 16384 (the SDK
+  refuses a non-streaming request past ~21k); one attempt, never backed off; a
+  retry that fails keeps the cut answer; the usage is both requests'. Desktop:
+  in `_chat`/`_chat_prose` (`_chat_response_retrying_cut`), never
+  `_chat_response` (the benchmarks keep fixed limits; the interrogation
+  agent's query expansion calls it directly); `LLMResponse.max_tokens` None
+  never retries; on Ollama only within a configured `context_window`; every
+  cut goes to SQLite `cut_answers` (`cut_answers.set_recorder`, set by the GUI
+  and MCP server, reset by tests). Apps: `raisedLimit` in each
+  `LLMService.chat`, no `room` cap (`num_ctx` is sized per request), the
+  connection test passes `retryingCut: false`, a cut answer still left is only
+  logged. **A cut answer with no text** (thinking took the limit) is asked
+  again too, and still textless it fails naming its limit (#830; iOS
+  `ReplyMessage`, `LLMError.cutBeforeWriting`; Android's nullable
+  `OpenAIChatMessage.content`).
 - **Every search query a fact check ran** (apps, PR #810): `SearchQueryLog`,
   Android Room 11 → 12; not yet seen on a device or simulator.
 - **Strict service JSON** (#781, #784): every service's JSON but esearch is
@@ -278,9 +271,9 @@ Open issues by family; each issue carries the detail. None blocks another.
   stage (spec §5) gets its own spec revision after that report. The shadow
   stage's parked follow-ups (untested paths, an unbounded queue, the wire
   contract fixture): **#815**.
-- **Android's real LLM usage (#818)** and **HyDE refusals (#819)**, from the
-  #813 measurement. From #822's review: **#829** a still-cut answer some
-  apps parsers read as complete (reader-facing: maintainer's call).
+- **HyDE refusals (#819)**, from the #813 measurement. From #822's review:
+  **#829** a still-cut answer some apps parsers read as complete
+  (reader-facing: maintainer's call).
   **#823** Haiku 5.5 refused 1 of 10 desktop quality assessments (read as
   unclassified).
 - **From the bmlib syncs.** PR #757's issues are fixed and unreleased (a

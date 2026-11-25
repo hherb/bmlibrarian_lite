@@ -19,10 +19,10 @@
 package com.bmlibrarian.factchecker.domain.workflow
 
 import com.bmlibrarian.factchecker.data.remote.llm.LLMService
+import com.bmlibrarian.factchecker.data.remote.llm.TokenTally
 import com.bmlibrarian.factchecker.domain.model.LLMError
 import com.bmlibrarian.factchecker.domain.model.LLMProvider
 import com.bmlibrarian.factchecker.domain.model.ModelInfo
-import com.bmlibrarian.factchecker.util.Constants
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -122,18 +122,6 @@ class ParallelScoringService @Inject constructor(
                     message.contains("429") ||
                     message.contains("503") ||
                     message.contains("502")
-        }
-
-        /**
-         * Estimate token count for text.
-         *
-         * Uses a rough approximation based on average characters per token.
-         *
-         * @param text The text to estimate tokens for.
-         * @return Estimated token count (minimum 1).
-         */
-        fun estimateTokens(text: String): Int {
-            return (text.length / Constants.TOKEN_ESTIMATE_CHARS_PER_TOKEN).coerceAtLeast(1)
         }
 
         /**
@@ -316,9 +304,9 @@ class ParallelScoringService @Inject constructor(
     ): ScoringResult {
         var lastParseError = ""
         var lastRawResponse = ""
-        var accumulatedInputTokens = 0
-        var accumulatedOutputTokens = 0
-        var accumulatedCost = 0.0
+        // Every attempt's reply is paid for, an unreadable one too (#818)
+        val tokens = TokenTally()
+        val cost = { modelInfo?.calculateCost(tokens.inputTokens, tokens.outputTokens) ?: 0.0 }
 
         // Retry loop for parse failures
         for (attempt in 0 until MAX_PARSE_RETRIES) {
@@ -331,17 +319,9 @@ class ParallelScoringService @Inject constructor(
                 abstractText = input.abstract.ifEmpty { null },
                 // Only a parse error is retried, so each later attempt follows
                 // an unreadable reply and asks with the note (#761)
-                correctJson = attempt > 0
+                correctJson = attempt > 0,
+                onUsage = tokens::add
             )
-
-            // Estimate tokens and cost using companion object function
-            val estimatedInput = estimateTokens(claim + input.title + input.abstract)
-            val estimatedOutput = Constants.LLM_SCORING_OUTPUT_ESTIMATE
-            val cost = modelInfo?.calculateCost(estimatedInput, estimatedOutput) ?: 0.0
-
-            accumulatedInputTokens += estimatedInput
-            accumulatedOutputTokens += estimatedOutput
-            accumulatedCost += cost
 
             result.fold(
                 onSuccess = { (score, rationale) ->
@@ -350,9 +330,9 @@ class ParallelScoringService @Inject constructor(
                         pmid = input.pmid,
                         score = score,
                         rationale = rationale,
-                        inputTokens = accumulatedInputTokens,
-                        outputTokens = accumulatedOutputTokens,
-                        costUsd = accumulatedCost
+                        inputTokens = tokens.inputTokens,
+                        outputTokens = tokens.outputTokens,
+                        costUsd = cost()
                     )
                 },
                 onFailure = { error ->
@@ -373,9 +353,9 @@ class ParallelScoringService @Inject constructor(
                             pmid = input.pmid,
                             error = error,
                             isRetryable = isRetryableError(error),
-                            inputTokens = accumulatedInputTokens,
-                            outputTokens = accumulatedOutputTokens,
-                            costUsd = accumulatedCost
+                            inputTokens = tokens.inputTokens,
+                            outputTokens = tokens.outputTokens,
+                            costUsd = cost()
                         )
                     }
                 }
@@ -388,9 +368,9 @@ class ParallelScoringService @Inject constructor(
             pmid = input.pmid,
             rawResponse = lastRawResponse,
             parseError = lastParseError,
-            inputTokens = accumulatedInputTokens,
-            outputTokens = accumulatedOutputTokens,
-            costUsd = accumulatedCost
+            inputTokens = tokens.inputTokens,
+            outputTokens = tokens.outputTokens,
+            costUsd = cost()
         )
     }
 

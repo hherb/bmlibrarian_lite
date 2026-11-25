@@ -64,6 +64,9 @@ class LLMService @Inject constructor(
      * @param maxTokens Maximum tokens to generate
      * @param temperature Sampling temperature (0.0-2.0), for OpenAI-format providers and Ollama's `options`; never sent to Claude (#758)
      * @param retryingCut False keeps the limit fixed (the connection test's ten tokens)
+     * @param onUsage Told each answered request's token counts as the reply states
+     *   them (#818), a retry's too, and an answer that then fails (unparsed, cut
+     *   before it wrote anything, empty or refused) as well: its tokens were spent
      * @return Result containing LLMResult on success, or LLMError on failure. An
      *   answer cut at its token limit is asked once more with the limit [raisedLimit]
      *   allows (#822, the desktop's #825); the retry's answer is returned, cut or
@@ -81,9 +84,10 @@ class LLMService @Inject constructor(
         userPrompt: String,
         maxTokens: Int = Constants.LLM_SCORING_MAX_TOKENS,
         temperature: Double = Constants.LLM_DEFAULT_TEMPERATURE.toDouble(),
-        retryingCut: Boolean = true
+        retryingCut: Boolean = true,
+        onUsage: UsageSink = NO_USAGE
     ): Result<LLMResult> {
-        val reply = chatRetryingFailures(provider, apiKey, model, systemPrompt, userPrompt, maxTokens, temperature)
+        val reply = chatRetryingFailures(provider, apiKey, model, systemPrompt, userPrompt, maxTokens, temperature, onUsage)
         val answer = reply.getOrNull() ?: return reply
         val raised = raisedLimit(answer.finishReason, answer.outputTokens, maxTokens)
         if (!retryingCut || raised == null) {
@@ -93,7 +97,7 @@ class LLMService @Inject constructor(
             return written(reply, model)
         }
         Log.w(TAG, "The answer from $model reached its token limit ($maxTokens); asking once more with $raised")
-        val retried = chatRetryingFailures(provider, apiKey, model, systemPrompt, userPrompt, raised, temperature, retries = 0)
+        val retried = chatRetryingFailures(provider, apiKey, model, systemPrompt, userPrompt, raised, temperature, onUsage, retries = 0)
         val retry = retried.getOrElse { e ->
             currentCoroutineContext().ensureActive()
             Log.w(TAG, "Asking $model once more with $raised failed (${e.message}); keeping the cut answer")
@@ -127,7 +131,8 @@ class LLMService @Inject constructor(
 
     /**
      * One answer, retried up to [retries] times with exponential backoff for
-     * transient failures; a cut answer is returned as it is.
+     * transient failures; a cut answer is returned as it is. [onUsage] is told
+     * the reply's tokens, a reply that holds no answer's too: it was paid for.
      */
     private suspend fun chatRetryingFailures(
         provider: LLMProvider,
@@ -137,9 +142,10 @@ class LLMService @Inject constructor(
         userPrompt: String,
         maxTokens: Int,
         temperature: Double,
+        onUsage: UsageSink,
         retries: Int = Constants.NETWORK_MAX_RETRIES
     ): Result<LLMResult> {
-        return try {
+        val reply = try {
             NetworkRetry.withExponentialBackoff(
                 maxRetries = retries,
                 shouldRetry = { e -> shouldRetryError(e) }
@@ -162,6 +168,13 @@ class LLMService @Inject constructor(
                 )
             )
         }
+        val answer = reply.getOrElse { return reply }
+        if (answer.inputTokens == 0 && answer.outputTokens == 0) {
+            Log.w(TAG, "The reply from $model stated no token usage; nothing is recorded for it")
+        }
+        onUsage(answer.inputTokens, answer.outputTokens)
+        // Not retried, as before: EmptyResponseError is not retryable
+        return if (answer.holdsAnswer) reply else Result.failure(LLMError.EmptyResponseError())
     }
 
     /**
@@ -178,13 +191,15 @@ class LLMService @Inject constructor(
      * @param apiKey The API key for authentication
      * @param model The model ID to use
      * @param claim The medical claim to convert
+     * @param onUsage Told each answered request's token counts (#818)
      * @return Result containing the StructuredQuery for provider-specific translation
      */
     suspend fun convertToStructuredQuery(
         provider: LLMProvider,
         apiKey: String,
         model: String,
-        claim: String
+        claim: String,
+        onUsage: UsageSink = NO_USAGE
     ): Result<StructuredQuery> {
         // Use structured JSON prompt for better local model compatibility
         // Mirrors the iOS approach for cross-platform consistency
@@ -225,7 +240,8 @@ class LLMService @Inject constructor(
             systemPrompt = "You are a medical librarian expert at converting natural language medical claims into effective PubMed search queries.",
             userPrompt = userPrompt,
             maxTokens = Constants.LLM_QUERY_MAX_TOKENS,
-            temperature = 0.1
+            temperature = 0.1,
+            onUsage = onUsage
         ).mapCatching { result ->
             StructuredQuery.parse(result.content)
                 ?: throw IllegalStateException("Failed to parse structured query from LLM response")
@@ -250,6 +266,7 @@ class LLMService @Inject constructor(
      * @param relevantCount Number of relevant documents found
      * @param triedQueries Alternative queries earlier rounds already ran, one each:
      *   its concept names joined by " AND ", not the provider query it ran as
+     * @param onUsage Told each answered request's token counts (#818)
      * @return The alternative queries; an empty list when the model answered
      *   with no query that can be used, or with nothing, which asking again may
      *   mend; or a failure when the request itself failed
@@ -262,7 +279,8 @@ class LLMService @Inject constructor(
         initialQuery: String?,
         totalResults: Int,
         relevantCount: Int,
-        triedQueries: List<String> = emptyList()
+        triedQueries: List<String> = emptyList(),
+        onUsage: UsageSink = NO_USAGE
     ): Result<List<StructuredQuery>> {
         val userPrompt = alternativeQueriesPrompt(claim, initialQuery, totalResults, relevantCount, triedQueries)
 
@@ -273,7 +291,8 @@ class LLMService @Inject constructor(
             systemPrompt = "You are a medical librarian expert at generating alternative search strategies for biomedical literature databases.",
             userPrompt = userPrompt,
             maxTokens = Constants.LLM_ALTERNATIVE_QUERIES_MAX_TOKENS,
-            temperature = 0.3
+            temperature = 0.3,
+            onUsage = onUsage
         )
         // An answer with no content reached the model as surely as one that does not parse
         if (answer.exceptionOrNull() is LLMError.EmptyResponseError) {
@@ -293,6 +312,7 @@ class LLMService @Inject constructor(
      * @param abstractText Document abstract (may be null)
      * @param correctJson Whether this asks again after an unreadable reply: the
      *   user turn then carries [JSON_CORRECTION_NOTE] (#761)
+     * @param onUsage Told each answered request's token counts (#818)
      * @return Result containing score (1-5) and rationale. A reply that holds no
      *   score on the scale is a failure with [LLMError.ParseError], carrying the
      *   whole reply as `rawResponse` (and logged), never a default score: the
@@ -306,7 +326,8 @@ class LLMService @Inject constructor(
         claim: String,
         title: String,
         abstractText: String?,
-        correctJson: Boolean = false
+        correctJson: Boolean = false,
+        onUsage: UsageSink = NO_USAGE
     ): Result<Pair<Int, String>> {
         val systemPrompt = """
             You are evaluating medical literature for relevance to a specific claim.
@@ -335,7 +356,8 @@ class LLMService @Inject constructor(
             model = model,
             systemPrompt = systemPrompt,
             userPrompt = userPrompt,
-            maxTokens = Constants.LLM_SCORING_MAX_TOKENS
+            maxTokens = Constants.LLM_SCORING_MAX_TOKENS,
+            onUsage = onUsage
         ).map { result ->
             val parsed = ResponseParser.parseScoreResponse(result.content)
             val score = parsed.score
@@ -362,6 +384,7 @@ class LLMService @Inject constructor(
      * @param content One window of the document's content (abstract or full text)
      * @param part Which window this is, from 1
      * @param parts How many windows the content was read in
+     * @param onUsage Told each answered request's token counts (#818)
      * @return Result containing list of citation extractions, or a failure with
      *   [LLMError.ParseError] when the reply holds a value JSON does not define (#761)
      */
@@ -373,7 +396,8 @@ class LLMService @Inject constructor(
         title: String,
         content: String?,
         part: Int = 1,
-        parts: Int = 1
+        parts: Int = 1,
+        onUsage: UsageSink = NO_USAGE
     ): Result<List<CitationExtraction>> {
         val systemPrompt = """
             You are extracting key passages from medical literature that are relevant to a claim.
@@ -398,7 +422,8 @@ class LLMService @Inject constructor(
             model = model,
             systemPrompt = systemPrompt,
             userPrompt = userPrompt,
-            maxTokens = Constants.LLM_CITATION_MAX_TOKENS
+            maxTokens = Constants.LLM_CITATION_MAX_TOKENS,
+            onUsage = onUsage
         ).map { result ->
             val citations = ResponseParser.parseCitationResponse(result.content)
                 ?: run {
@@ -429,6 +454,7 @@ class LLMService @Inject constructor(
      * @param model The model ID to use
      * @param claim The medical claim being evaluated
      * @param citations List of document citations to synthesize
+     * @param onUsage Told each answered request's token counts (#818)
      * @return Result containing report generation result
      */
     suspend fun generateReport(
@@ -436,7 +462,8 @@ class LLMService @Inject constructor(
         apiKey: String,
         model: String,
         claim: String,
-        citations: List<DocumentCitation>
+        citations: List<DocumentCitation>,
+        onUsage: UsageSink = NO_USAGE
     ): Result<ReportGeneration> {
         val systemPrompt = """
             You are a medical evidence synthesizer creating a fact-check report.
@@ -501,7 +528,8 @@ class LLMService @Inject constructor(
             model = model,
             systemPrompt = systemPrompt,
             userPrompt = userPrompt,
-            maxTokens = Constants.LLM_REPORT_MAX_TOKENS
+            maxTokens = Constants.LLM_REPORT_MAX_TOKENS,
+            onUsage = onUsage
         ).map { result ->
             val parsed = ResponseParser.parseReportResponse(result.content)
             ReportGeneration(
@@ -519,13 +547,15 @@ class LLMService @Inject constructor(
      * @param apiKey The API key for authentication
      * @param model The model ID to use
      * @param claim The medical claim
+     * @param onUsage Told each answered request's token counts (#818)
      * @return Result containing the hypothetical abstract text
      */
     suspend fun generateHypotheticalDocument(
         provider: LLMProvider,
         apiKey: String,
         model: String,
-        claim: String
+        claim: String,
+        onUsage: UsageSink = NO_USAGE
     ): Result<String> {
         val systemPrompt = """
             You are generating a hypothetical abstract for a medical research paper that would
@@ -547,7 +577,8 @@ class LLMService @Inject constructor(
             model = model,
             systemPrompt = systemPrompt,
             userPrompt = "Generate a hypothetical abstract for: $claim",
-            maxTokens = Constants.LLM_HYDE_MAX_TOKENS
+            maxTokens = Constants.LLM_HYDE_MAX_TOKENS,
+            onUsage = onUsage
         ).map { it.content.trim() }
     }
 
@@ -618,7 +649,7 @@ class LLMService @Inject constructor(
         val response = ollamaApi.chat("${OllamaContext.nativeRoot(provider.baseUrl)}/api/chat", request)
         if (response.isSuccessful) {
             val body = response.body() ?: throw LLMError.EmptyResponseError()
-            return Result.success(LLMResult.fromOllama(body) ?: throw LLMError.EmptyResponseError())
+            return Result.success(LLMResult.fromOllama(body))
         }
         val errorBody = response.errorBody()?.string()
         val reason = errorBody?.let { ollamaError(it) } ?: response.message()
@@ -822,13 +853,7 @@ class LLMService @Inject constructor(
     private fun handleOpenAIResponse(response: Response<OpenAIChatResponse>): Result<LLMResult> {
         if (response.isSuccessful) {
             val body = response.body()
-            if (body != null) {
-                val result = LLMResult.fromOpenAI(body)
-                if (result != null) {
-                    return Result.success(result)
-                }
-                throw LLMError.EmptyResponseError()
-            }
+            if (body != null) return Result.success(LLMResult.fromOpenAI(body))
             throw LLMError.EmptyResponseError()
         } else {
             val errorBody = response.errorBody()?.string()
@@ -842,13 +867,7 @@ class LLMService @Inject constructor(
     private fun handleAnthropicResponse(response: Response<AnthropicMessagesResponse>): Result<LLMResult> {
         if (response.isSuccessful) {
             val body = response.body()
-            if (body != null) {
-                val result = LLMResult.fromAnthropic(body)
-                if (result != null) {
-                    return Result.success(result)
-                }
-                throw LLMError.EmptyResponseError()
-            }
+            if (body != null) return Result.success(LLMResult.fromAnthropic(body))
             throw LLMError.EmptyResponseError()
         } else {
             val errorBody = response.errorBody()?.string()

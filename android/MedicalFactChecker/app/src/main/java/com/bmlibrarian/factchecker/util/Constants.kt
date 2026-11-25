@@ -527,22 +527,6 @@ object Constants {
     /** The most output tokens a cut answer is asked again with, as on the desktop and iOS. */
     const val LLM_CUT_ANSWER_RETRY_MAX_TOKENS = 16384
 
-    // Output tokens recorded for each call: usage is estimated, not read from
-    // the reply (#818), so these keep the figures recorded before the limits
-    // were raised.
-
-    /** Output tokens recorded for a query conversion or an alternative-queries call. */
-    const val LLM_QUERY_OUTPUT_ESTIMATE = 256
-
-    /** Output tokens recorded for a scoring call or a HyDE abstract. */
-    const val LLM_SCORING_OUTPUT_ESTIMATE = 250
-
-    /** Output tokens recorded for one citation extraction window. */
-    const val LLM_CITATION_OUTPUT_ESTIMATE = 500
-
-    /** Output tokens recorded for a report. */
-    const val LLM_REPORT_OUTPUT_ESTIMATE = 2000
-
     /**
      * How many more times smart search asks the model for alternative queries
      * when its answer holds none that can be used. Each answer is a paid call.

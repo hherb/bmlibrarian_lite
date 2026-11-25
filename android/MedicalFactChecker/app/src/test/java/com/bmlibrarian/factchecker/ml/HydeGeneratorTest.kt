@@ -20,6 +20,7 @@ package com.bmlibrarian.factchecker.ml
 
 import com.bmlibrarian.factchecker.data.remote.llm.LLMResult
 import com.bmlibrarian.factchecker.data.remote.llm.LLMService
+import com.bmlibrarian.factchecker.data.remote.llm.UsageSink
 import com.bmlibrarian.factchecker.domain.model.LLMProvider
 import com.bmlibrarian.factchecker.util.Constants
 import io.mockk.coEvery
@@ -27,6 +28,7 @@ import io.mockk.mockk
 import io.mockk.slot
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Test
 
 class HydeGeneratorTest {
@@ -38,7 +40,7 @@ class HydeGeneratorTest {
         val maxTokens = slot<Int>()
         val abstract = "word ".repeat(Constants.HYDE_TARGET_WORD_COUNT_MIN).trim()
         coEvery {
-            llmService.chat(any(), any(), any(), any(), any(), capture(maxTokens), any())
+            llmService.chat(any(), any(), any(), any(), any(), capture(maxTokens), any(), any(), any())
         } returns Result.success(LLMResult(abstract, 0, 0, "stop", "m"))
 
         val generated = HydeGenerator(llmService)
@@ -46,5 +48,22 @@ class HydeGeneratorTest {
 
         assertEquals(abstract, generated)
         assertEquals(Constants.LLM_HYDE_MAX_TOKENS, maxTokens.captured)
+    }
+
+    @Test
+    fun `the tokens of an abstract too short to use are still heard`() = runTest {
+        val llmService = mockk<LLMService>()
+        coEvery { llmService.chat(any(), any(), any(), any(), any(), any(), any(), any(), any()) } answers {
+            arg<UsageSink>(8)(40, 7)
+            Result.success(LLMResult("too short", 40, 7, "stop", "m"))
+        }
+        val heard = mutableListOf<Pair<Int, Int>>()
+
+        val generated = HydeGenerator(llmService).generateHypotheticalAbstract(
+            "Aspirin prevents stroke", LLMProvider.ANTHROPIC, "k", "m", onUsage = { i, o -> heard += i to o }
+        )
+
+        assertNull(generated)
+        assertEquals(listOf(40 to 7), heard)
     }
 }

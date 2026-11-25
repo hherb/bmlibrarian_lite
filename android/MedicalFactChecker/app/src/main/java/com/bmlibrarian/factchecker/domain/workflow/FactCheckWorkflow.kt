@@ -31,6 +31,7 @@ import com.bmlibrarian.factchecker.data.remote.fulltext.FullTextService
 import com.bmlibrarian.factchecker.data.remote.fulltext.FullTextService.FullTextResult
 import com.bmlibrarian.factchecker.data.remote.fulltext.recordingFullTextFetch
 import com.bmlibrarian.factchecker.data.remote.llm.LLMService
+import com.bmlibrarian.factchecker.data.remote.llm.TokenTally
 import com.bmlibrarian.factchecker.data.repository.DocumentRepository
 import com.bmlibrarian.factchecker.data.repository.ReportRepository
 import com.bmlibrarian.factchecker.data.repository.SessionRepository
@@ -1418,24 +1419,21 @@ class FactCheckWorkflow @Inject constructor(
         val apiKey = settingsRepository.getLlmApiKey()
         val model = settingsRepository.getLlmModel()
 
+        val tokens = TokenTally()
         val result = llmService.convertToStructuredQuery(
             provider = provider,
             apiKey = apiKey,
             model = model,
-            claim = claim
+            claim = claim,
+            onUsage = tokens::add
         )
+        // Before the failure check: an unreadable answer was paid for too
+        recordUsage("query_conversion", tokens)
 
         if (result.isFailure) {
             throw result.exceptionOrNull()
                 ?: Exception("Failed to convert claim to query")
         }
-
-        // Record usage (approximate since we don't have token counts from this call)
-        recordUsage(
-            operation = "query_conversion",
-            inputTokens = estimateTokens(claim),
-            outputTokens = Constants.LLM_QUERY_OUTPUT_ESTIMATE
-        )
 
         // Store structured query for provider-specific translation
         var parsed = result.getOrThrow()
@@ -1595,24 +1593,20 @@ class FactCheckWorkflow @Inject constructor(
 
         // Generate HyDE abstract if enabled for better semantic matching
         val embeddingQuery = if (settingsRepository.isHydeEnabled()) {
+            val tokens = TokenTally()
             val hydeAbstract = hydeGenerator.generateHypotheticalAbstract(
                 claim = claim,
                 provider = provider,
                 apiKey = apiKey,
-                model = model
+                model = model,
+                onUsage = tokens::add
             )
+            recordUsage("hyde_generation", tokens)
 
             if (hydeAbstract != null) {
                 // Save HyDE abstract to session
                 sessionRepository.updateHydeAbstract(session.id, hydeAbstract)
                 Log.i(TAG, "Generated HyDE abstract: ${hydeAbstract.take(100)}...")
-
-                // Record HyDE generation usage
-                recordUsage(
-                    operation = "hyde_generation",
-                    inputTokens = estimateTokens(claim),
-                    outputTokens = Constants.LLM_SCORING_OUTPUT_ESTIMATE
-                )
 
                 hydeAbstract
             } else {
@@ -2048,26 +2042,22 @@ class FactCheckWorkflow @Inject constructor(
             return createNoEvidenceReport(sessionId, claim, relevantCount, model, shortfalls, retraction)
         }
 
+        val tokens = TokenTally()
         val result = llmService.generateReport(
             provider = provider,
             apiKey = apiKey,
             model = model,
             claim = claim,
-            citations = citationData
+            citations = citationData,
+            onUsage = tokens::add
         )
+        recordUsage("report", tokens)
 
         if (result.isFailure) {
             throw result.exceptionOrNull() ?: Exception("Failed to generate report")
         }
 
         val generation = result.getOrThrow()
-
-        // Record usage
-        recordUsage(
-            operation = "report",
-            inputTokens = estimateTokens(claim + citationData.joinToString { it.passage }),
-            outputTokens = Constants.LLM_REPORT_OUTPUT_ESTIMATE
-        )
 
         // Build references section
         val relevantDocs = documents.filter { (it.relevanceScore ?: 0) >= config.relevanceThreshold }
@@ -2513,6 +2503,7 @@ class FactCheckWorkflow @Inject constructor(
         val attempts = Constants.MAX_QUERY_RETRIES + 1
         repeat(attempts) { attempt ->
             checkBudget(session, config)
+            val tokens = TokenTally()
             val answer = llmService.generateAlternativeQueries(
                 provider = getLLMProvider(),
                 apiKey = settingsRepository.getLlmApiKey(),
@@ -2521,14 +2512,11 @@ class FactCheckWorkflow @Inject constructor(
                 initialQuery = session.pubmedQuery,
                 totalResults = session.pubmedTotalResults + session.epmcTotalResults,
                 relevantCount = relevantCount,
-                triedQueries = triedQueries
+                triedQueries = triedQueries,
+                onUsage = tokens::add
             )
+            recordUsage("smart_search_query_generation", tokens)
             val queries = answer.getOrElse { return Result.failure(it) }
-            recordUsage(
-                operation = "smart_search_query_generation",
-                inputTokens = estimateTokens(session.claimText),
-                outputTokens = Constants.LLM_QUERY_OUTPUT_ESTIMATE
-            )
             if (queries.isNotEmpty()) return Result.success(queries)
             Log.w(TAG, "Smart search's answer ${attempt + 1} of $attempts held no usable query")
         }
@@ -2683,13 +2671,15 @@ class FactCheckWorkflow @Inject constructor(
     }
 
     /**
-     * Record API usage for budget tracking.
+     * Record API usage for budget tracking; nothing when no reply stated any
+     * tokens (#818): a request that failed before an answer costs nothing.
      */
     private suspend fun recordUsage(
         operation: String,
         inputTokens: Int,
         outputTokens: Int
     ) {
+        if (inputTokens == 0 && outputTokens == 0) return
         val session = currentSession ?: return
         val model = settingsRepository.getLlmModel()
         val providerId = settingsRepository.getLlmProvider()
@@ -2757,17 +2747,13 @@ class FactCheckWorkflow @Inject constructor(
     }
 
     /**
-     * Estimate token count for text.
+     * Record what [tokens] counted (#818).
      *
-     * Uses a rough approximation based on average characters per token.
-     * This is sufficient for cost estimation purposes.
-     *
-     * @param text The text to estimate tokens for
-     * @return Estimated token count (minimum 1)
+     * @param operation The operation name for the usage table
+     * @param tokens The task's requests' real token counts
      */
-    private fun estimateTokens(text: String): Int {
-        return (text.length / Constants.TOKEN_ESTIMATE_CHARS_PER_TOKEN).coerceAtLeast(1)
-    }
+    private suspend fun recordUsage(operation: String, tokens: TokenTally) =
+        recordUsage(operation, tokens.inputTokens, tokens.outputTokens)
 
     /**
      * Build the references section for the report.

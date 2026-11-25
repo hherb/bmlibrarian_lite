@@ -23,6 +23,7 @@ import kotlinx.serialization.json.Json
 import okhttp3.ResponseBody.Companion.toResponseBody
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -258,7 +259,7 @@ class CutAnswerRetryTest {
 
         val reply = Json { ignoreUnknownKeys = true }.decodeFromString(OpenAIChatResponse.serializer(), body)
 
-        assertEquals("", LLMResult.fromOpenAI(reply)?.content)
+        assertEquals("", LLMResult.fromOpenAI(reply).content)
     }
 
     @Test
@@ -337,9 +338,73 @@ class CutAnswerRetryTest {
 
     @Test
     fun `a textless reply is an answer only when it was cut`() {
-        assertEquals("", LLMResult.fromOllama(OllamaChatResponse(message = null, evalCount = 2048, doneReason = "length"))?.content)
-        assertNull(LLMResult.fromOllama(OllamaChatResponse(message = null, doneReason = "stop")))
-        assertNull(LLMResult.fromAnthropic(AnthropicMessagesResponse(content = emptyList(), stopReason = "end_turn")))
-        assertNull(LLMResult.fromAnthropic(AnthropicMessagesResponse(content = emptyList(), stopReason = "refusal")))
+        assertTrue(LLMResult.fromOllama(OllamaChatResponse(message = null, evalCount = 2048, doneReason = "length")).holdsAnswer)
+        assertFalse(LLMResult.fromOllama(OllamaChatResponse(message = null, doneReason = "stop")).holdsAnswer)
+        assertFalse(LLMResult.fromAnthropic(AnthropicMessagesResponse(content = emptyList(), stopReason = "end_turn")).holdsAnswer)
+        assertFalse(LLMResult.fromAnthropic(AnthropicMessagesResponse(content = emptyList(), stopReason = "refusal")).holdsAnswer)
+        assertFalse(LLMResult.fromOpenAI(OpenAIChatResponse(id = "x", choices = emptyList())).holdsAnswer)
+        assertTrue("an empty text is still an answer", LLMResult.fromOpenAI(answer("", "stop", 1).body()!!).holdsAnswer)
+    }
+
+    @Test
+    fun `an empty reply that was not cut is paid for, so onUsage hears it`() = runTest {
+        openAIReplies(textless("stop", 300))
+        val heard = mutableListOf<Pair<Int, Int>>()
+
+        val failed = service.chat(LLMProvider.OPENAI, "k", "m", "s", "u", maxTokens = 2048, onUsage = { i, o -> heard += i to o })
+
+        assertEquals(LLMError.EmptyResponseError(), failed.exceptionOrNull())
+        assertEquals(listOf(100 to 300), heard)
+    }
+
+    @Test
+    fun `Anthropic's refusal is paid for, so onUsage hears it`() = runTest {
+        coEvery { anthropicApi.createMessage(any(), any(), any(), any()) } returns Response.success(
+            AnthropicMessagesResponse(
+                id = "msg", content = emptyList(), stopReason = "refusal",
+                usage = AnthropicUsage(inputTokens = 120, outputTokens = 3)
+            )
+        )
+        val heard = mutableListOf<Pair<Int, Int>>()
+
+        val failed = service.chat(
+            provider = LLMProvider.ANTHROPIC, apiKey = "k", model = "claude", systemPrompt = "s", userPrompt = "u",
+            maxTokens = 2048, onUsage = { i, o -> heard += i to o }
+        )
+
+        assertEquals(LLMError.EmptyResponseError(), failed.exceptionOrNull())
+        assertEquals(listOf(120 to 3), heard)
+    }
+
+    // ==================== #818: each request's real tokens ====================
+
+    @Test
+    fun `onUsage hears each request's own tokens, a retry's and a failed answer's too`() = runTest {
+        openAIReplies(answer("cut", "length", 2048), answer("whole", "stop", 2300), textless("length", 2048), textless("length", 4096))
+        val heard = mutableListOf<Pair<Int, Int>>()
+
+        service.chat(LLMProvider.OPENAI, "k", "m", "s", "u", maxTokens = 2048, onUsage = { i, o -> heard += i to o })
+        val failed = service.chat(LLMProvider.OPENAI, "k", "m", "s", "u", maxTokens = 2048, onUsage = { i, o -> heard += i to o })
+
+        assertCutBeforeWriting(failed)
+        assertEquals(listOf(100 to 2048, 100 to 2300, 100 to 2048, 100 to 4096), heard)
+    }
+
+    @Test
+    fun `every task method passes its onUsage to chat`() = runTest {
+        // one reply each, its own output count; what the content parses to does not matter
+        openAIReplies(*(1..6).map { answer("{}", "stop", it) }.toTypedArray())
+        val heard = mutableListOf<Pair<Int, Int>>()
+        val sink: UsageSink = { i, o -> heard += i to o }
+        val p = LLMProvider.OPENAI
+
+        service.convertToStructuredQuery(p, "k", "m", "claim", onUsage = sink)
+        service.generateAlternativeQueries(p, "k", "m", "claim", null, 0, 0, onUsage = sink)
+        service.scoreDocument(p, "k", "m", "claim", "title", "abstract", onUsage = sink)
+        service.extractCitations(p, "k", "m", "claim", "title", "abstract", onUsage = sink)
+        service.generateReport(p, "k", "m", "claim", listOf(LLMService.DocumentCitation("t", "passage")), onUsage = sink)
+        service.generateHypotheticalDocument(p, "k", "m", "claim", onUsage = sink)
+
+        assertEquals((1..6).map { 100 to it }, heard)
     }
 }

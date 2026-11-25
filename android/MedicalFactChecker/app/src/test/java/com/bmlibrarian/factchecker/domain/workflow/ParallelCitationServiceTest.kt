@@ -6,6 +6,7 @@ package com.bmlibrarian.factchecker.domain.workflow
 
 import com.bmlibrarian.factchecker.data.remote.llm.LLMService
 import com.bmlibrarian.factchecker.data.remote.llm.LLMService.CitationExtraction
+import com.bmlibrarian.factchecker.data.remote.llm.UsageSink
 import com.bmlibrarian.factchecker.domain.model.LLMProvider
 import io.mockk.coEvery
 import io.mockk.mockk
@@ -24,10 +25,11 @@ class ParallelCitationServiceTest {
 
     private fun llm(answer: (content: String?, part: Int) -> Result<List<CitationExtraction>>): LLMService {
         val llm = mockk<LLMService>()
-        coEvery { llm.extractCitations(any(), any(), any(), any(), any(), any(), any(), any()) } answers {
+        coEvery { llm.extractCitations(any(), any(), any(), any(), any(), any(), any(), any(), any()) } answers {
             val content = arg<String?>(5)
             val part = arg<Int>(6)
             asked += Triple(content, part, arg(7))
+            arg<UsageSink>(8)(100 + part, 7) // each window's reply states its own tokens
             answer(content, part)
         }
         return llm
@@ -53,15 +55,26 @@ class ParallelCitationServiceTest {
     }
 
     @Test
-    fun `the usage of every window is summed`() = runTest {
-        val one = extract(llm { _, _ -> Result.success(emptyList()) }, input("A short body."))
-        assertEquals(1, asked.size)
-        asked.clear()
+    fun `the usage every window's reply states is summed`() = runTest {
+        // #818: the replies' own counts, never an estimate from the text's length
         val many = extract(llm { _, _ -> Result.success(emptyList()) }, input(longText))
 
-        assertTrue(asked.size > 1)
-        assertEquals(one.outputTokens * asked.size, many.outputTokens)
-        assertTrue(many.inputTokens >= input(longText).windows.sumOf { it.length } / 4)
+        val parts = asked.map { it.second }
+        assertTrue(parts.size > 1)
+        assertEquals(parts.sumOf { 100 + it }, many.inputTokens)
+        assertEquals(7 * parts.size, many.outputTokens)
+    }
+
+    @Test
+    fun `a window that fails still counts what its reply used`() = runTest {
+        val result = extract(
+            llm { _, part -> if (part == 2) Result.failure(IllegalStateException("unreadable")) else Result.success(emptyList()) },
+            input(longText)
+        )
+
+        assertTrue(result.isError)
+        assertEquals(101 + 102, result.inputTokens)
+        assertEquals(14, result.outputTokens)
     }
 
     @Test

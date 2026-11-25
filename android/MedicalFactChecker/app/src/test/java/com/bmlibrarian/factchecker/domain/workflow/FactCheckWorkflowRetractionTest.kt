@@ -126,7 +126,7 @@ class FactCheckWorkflowRetractionTest {
         every { settingsRepository.settings } returns MutableStateFlow(AppSettings())
         llmService = mockk(relaxed = true)
         literatureSearch = mockk(relaxed = true)
-        coEvery { llmService.generateReport(any(), any(), any(), any(), any()) } returns
+        coEvery { llmService.generateReport(any(), any(), any(), any(), any(), any()) } returns
             Result.success(LLMService.ReportGeneration(verdict = "supported", summary = "S", report = "The analysis."))
 
         coEvery { sessionRepository.getSession(SESSION_ID) } answers { session.copy(retractionSnapshotJson = snapshotJson) }
@@ -505,7 +505,7 @@ class FactCheckWorkflowRetractionTest {
         hold("d1")
         hold("d2")
         answers["2"] = RETRACTED
-        coEvery { llmService.generateAlternativeQueries(any(), any(), any(), any(), any(), any(), any(), any()) } returns
+        coEvery { llmService.generateAlternativeQueries(any(), any(), any(), any(), any(), any(), any(), any(), any()) } returns
             Result.success(listOf(StructuredQuery(concepts = listOf(SearchConcept(name = "salicylate", keywords = listOf("salicylate"))))))
         // smart search finds d2 again beside a new d3
         coEvery { literatureSearch.searchPage(any()) } answers {

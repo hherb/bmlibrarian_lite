@@ -449,65 +449,101 @@ data class LLMResult(
     /** Reason for completion (e.g., "stop", "length"). */
     val finishReason: String?,
     /** Model that generated this response. */
-    val model: String?
+    val model: String?,
+    /**
+     * Whether the reply holds an answer: false when it has no text and was not
+     * cut (a refusal, a filtered or empty reply). Its tokens were still spent, so
+     * [LLMService] reports them before it fails the reply (#818).
+     */
+    val holdsAnswer: Boolean = true
 ) {
     companion object {
         /**
-         * Create LLMResult from OpenAI response; null when it holds no answer.
-         * An answer cut at its limit with no text is one (#830): [LLMService.chat]
-         * asks it again with a larger limit.
+         * Create LLMResult from OpenAI response. One with no choice, or no text
+         * and not cut, holds no answer; an answer cut at its limit with no text
+         * holds one (#830): [LLMService.chat] asks it again with a larger limit.
          */
-        fun fromOpenAI(response: OpenAIChatResponse): LLMResult? {
-            val choice = response.choices.firstOrNull() ?: return null
-            val content = choice.message?.content
-                ?: if (LLMService.isCut(choice.finishReason)) "" else return null
-
+        fun fromOpenAI(response: OpenAIChatResponse): LLMResult {
+            val choice = response.choices.firstOrNull()
+            val content = choice?.message?.content
             return LLMResult(
-                content = content,
+                content = content ?: "",
                 inputTokens = response.usage?.promptTokens ?: 0,
                 outputTokens = response.usage?.completionTokens ?: 0,
-                finishReason = choice.finishReason,
-                model = response.model
+                finishReason = choice?.finishReason,
+                model = response.model,
+                holdsAnswer = content != null || LLMService.isCut(choice?.finishReason)
             )
         }
 
         /**
-         * Create LLMResult from an Ollama native chat reply; null when it holds no
-         * answer (a cut one with no text is one, as in [fromOpenAI]).
+         * Create LLMResult from an Ollama native chat reply; one with no text
+         * holds an answer only when cut, as in [fromOpenAI].
          */
-        fun fromOllama(response: OllamaChatResponse): LLMResult? {
+        fun fromOllama(response: OllamaChatResponse): LLMResult {
             val content = response.message?.content
-                ?: if (LLMService.isCut(response.doneReason)) "" else return null
-
             return LLMResult(
-                content = content,
+                content = content ?: "",
                 inputTokens = response.promptEvalCount ?: 0,
                 outputTokens = response.evalCount ?: 0,
                 finishReason = response.doneReason,
-                model = response.model
+                model = response.model,
+                holdsAnswer = content != null || LLMService.isCut(response.doneReason)
             )
         }
 
         /**
-         * Create LLMResult from Anthropic response; null when it holds no text,
-         * unless it stopped at `max_tokens` (thinking took the limit, #830), as in
-         * [fromOpenAI].
+         * Create LLMResult from Anthropic response; one with no text holds an
+         * answer only when it stopped at `max_tokens` (thinking took the limit,
+         * #830), as in [fromOpenAI].
          */
-        fun fromAnthropic(response: AnthropicMessagesResponse): LLMResult? {
+        fun fromAnthropic(response: AnthropicMessagesResponse): LLMResult {
             val textContent = response.content
                 .filter { it.type == "text" }
                 .mapNotNull { it.text }
                 .joinToString("")
-
-            if (textContent.isEmpty() && !LLMService.isCut(response.stopReason)) return null
 
             return LLMResult(
                 content = textContent,
                 inputTokens = response.usage?.inputTokens ?: 0,
                 outputTokens = response.usage?.outputTokens ?: 0,
                 finishReason = response.stopReason,
-                model = response.model
+                model = response.model,
+                holdsAnswer = textContent.isNotEmpty() || LLMService.isCut(response.stopReason)
             )
         }
+    }
+}
+
+// ==================== Token usage ====================
+
+/**
+ * Told an answered request's token counts, as the reply states them (#818).
+ * [LLMService] calls it once per request, a cut answer's retry included.
+ */
+typealias UsageSink = (inputTokens: Int, outputTokens: Int) -> Unit
+
+/** A [UsageSink] for a caller that records no usage. */
+val NO_USAGE: UsageSink = { _, _ -> }
+
+/**
+ * The tokens one task's requests used, summed from each reply (#818).
+ *
+ * Pass [add] as the `onUsage` of an [LLMService] call, then record
+ * [inputTokens] and [outputTokens]. Not thread-safe: use one tally per task.
+ */
+class TokenTally {
+    /** Input tokens summed so far. */
+    var inputTokens = 0
+        private set
+
+    /** Output tokens (thinking included) summed so far. */
+    var outputTokens = 0
+        private set
+
+    /** Adds one request's tokens; a [UsageSink]. */
+    fun add(inputTokens: Int, outputTokens: Int) {
+        this.inputTokens += inputTokens
+        this.outputTokens += outputTokens
     }
 }
