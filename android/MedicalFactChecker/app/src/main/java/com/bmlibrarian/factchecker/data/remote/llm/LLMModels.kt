@@ -511,3 +511,39 @@ data class LLMResult(
         }
     }
 }
+
+// ==================== Token usage ====================
+
+/**
+ * Told an answered request's token counts, as the reply states them (#818).
+ * [LLMService] calls it once per request, a cut answer's retry included.
+ */
+typealias UsageSink = (inputTokens: Int, outputTokens: Int) -> Unit
+
+/** A [UsageSink] for a caller that records no usage. */
+val NO_USAGE: UsageSink = { _, _ -> }
+
+/**
+ * The tokens one task's requests used, summed from each reply (#818).
+ *
+ * Pass [add] as the `onUsage` of an [LLMService] call, then record
+ * [inputTokens] and [outputTokens]. Not thread-safe: use one tally per task.
+ */
+class TokenTally {
+    /** Input tokens summed so far. */
+    var inputTokens = 0
+        private set
+
+    /** Output tokens (thinking included) summed so far. */
+    var outputTokens = 0
+        private set
+
+    /** Whether no request has stated any tokens yet. */
+    val isEmpty: Boolean get() = inputTokens == 0 && outputTokens == 0
+
+    /** Adds one request's tokens; a [UsageSink]. */
+    fun add(inputTokens: Int, outputTokens: Int) {
+        this.inputTokens += inputTokens
+        this.outputTokens += outputTokens
+    }
+}

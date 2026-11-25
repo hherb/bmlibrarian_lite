@@ -25,6 +25,7 @@ import com.bmlibrarian.factchecker.data.local.entity.SessionEntity
 import com.bmlibrarian.factchecker.data.remote.fulltext.FullTextService
 import com.bmlibrarian.factchecker.data.remote.fulltext.FullTextService.FullTextResult
 import com.bmlibrarian.factchecker.data.remote.llm.LLMService
+import com.bmlibrarian.factchecker.data.remote.llm.UsageSink
 import com.bmlibrarian.factchecker.data.repository.DocumentRepository
 import com.bmlibrarian.factchecker.data.repository.ReportRepository
 import com.bmlibrarian.factchecker.data.repository.SessionRepository
@@ -101,8 +102,10 @@ class FactCheckWorkflowFullTextTest {
         every { settingsRepository.getLlmModel() } returns LLMProvider.OPENAI.defaultModel
         every { settingsRepository.settings } returns MutableStateFlow(AppSettings())
         val llmService = mockk<LLMService>(relaxed = true)
-        coEvery { llmService.generateReport(any(), any(), any(), any(), any()) } returns
+        coEvery { llmService.generateReport(any(), any(), any(), any(), any(), any()) } answers {
+            arg<UsageSink>(5)(REPORT_INPUT_TOKENS, REPORT_OUTPUT_TOKENS) // the reply's own counts
             Result.success(LLMService.ReportGeneration(verdict = "supported", summary = "S", report = "The analysis."))
+        }
 
         coEvery { documentRepository.getDocumentsBySessionSync(SESSION_ID) } answers { documents.values.toList() }
         coEvery { documentRepository.getDocument(any()) } answers { documents[firstArg()] }
@@ -178,6 +181,18 @@ class FactCheckWorkflowFullTextTest {
         assertEquals(listOf("A new passage."), citations.map { it.passage })
         assertEquals(true, documents.getValue("d1").citationsReadFullText)
         assertEquals(WorkflowState.Completed(reportId = "report-new"), workflow.state.value)
+    }
+
+    @Test
+    fun `the report's usage is what its reply stated, never an estimate`() = runTest {
+        // #818: recorded as the reply's tokens, not 4 characters a token plus a fixed 2000
+        holdPaper(paper().copy(fullTextMarkdown = "The uploaded body.", fullTextSource = Constants.FULLTEXT_SOURCE_UPLOADED, citationsReadFullText = false))
+
+        workflow.retryFullTextRetrieval(WorkflowConfig(autoFetchFullText = false))
+
+        coVerify(exactly = 1) {
+            usageRepository.recordUsage(SESSION_ID, any(), any(), "report", REPORT_INPUT_TOKENS, REPORT_OUTPUT_TOKENS, any())
+        }
     }
 
     @Test
@@ -375,5 +390,7 @@ class FactCheckWorkflowFullTextTest {
     private companion object {
         const val SESSION_ID = "session-full-text"
         const val REPORT_ID = "report-1"
+        const val REPORT_INPUT_TOKENS = 1234
+        const val REPORT_OUTPUT_TOKENS = 5678
     }
 }

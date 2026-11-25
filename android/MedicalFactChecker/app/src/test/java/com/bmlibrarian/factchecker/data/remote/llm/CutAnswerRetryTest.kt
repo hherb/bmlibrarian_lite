@@ -342,4 +342,18 @@ class CutAnswerRetryTest {
         assertNull(LLMResult.fromAnthropic(AnthropicMessagesResponse(content = emptyList(), stopReason = "end_turn")))
         assertNull(LLMResult.fromAnthropic(AnthropicMessagesResponse(content = emptyList(), stopReason = "refusal")))
     }
+
+    // ==================== #818: each request's real tokens ====================
+
+    @Test
+    fun `onUsage hears each request's own tokens, a retry's and a failed answer's too`() = runTest {
+        openAIReplies(answer("cut", "length", 2048), answer("whole", "stop", 2300), textless("length", 2048), textless("length", 4096))
+        val heard = mutableListOf<Pair<Int, Int>>()
+
+        service.chat(LLMProvider.OPENAI, "k", "m", "s", "u", maxTokens = 2048, onUsage = { i, o -> heard += i to o })
+        val failed = service.chat(LLMProvider.OPENAI, "k", "m", "s", "u", maxTokens = 2048, onUsage = { i, o -> heard += i to o })
+
+        assertCutBeforeWriting(failed)
+        assertEquals(listOf(100 to 2048, 100 to 2300, 100 to 2048, 100 to 4096), heard)
+    }
 }

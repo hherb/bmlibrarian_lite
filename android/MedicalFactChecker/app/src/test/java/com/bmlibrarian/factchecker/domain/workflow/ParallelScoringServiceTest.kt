@@ -9,6 +9,7 @@ import com.bmlibrarian.factchecker.domain.model.LLMError
 import com.bmlibrarian.factchecker.domain.model.LLMProvider
 import com.bmlibrarian.factchecker.data.remote.llm.LLMResult
 import com.bmlibrarian.factchecker.data.remote.llm.LLMService
+import com.bmlibrarian.factchecker.data.remote.llm.UsageSink
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
@@ -33,7 +34,7 @@ class ParallelScoringServiceTest {
 
     private fun llmAnswering(content: String): LLMService {
         val llm = spyk(LLMService(mockk(relaxed = true), mockk(relaxed = true), mockk(relaxed = true)))
-        coEvery { llm.chat(any(), any(), any(), any(), any(), any(), any()) } returns
+        coEvery { llm.chat(any(), any(), any(), any(), any(), any(), any(), any(), any()) } returns
             Result.success(LLMResult(content, 10, 10, "stop", "fake"))
         return llm
     }
@@ -64,7 +65,7 @@ class ParallelScoringServiceTest {
         assertEquals(1, results.size)
         assertTrue(results[0].toString(), results[0] is ScoringResult.ParseFailure)
         coVerify(exactly = ParallelScoringService.MAX_PARSE_RETRIES) {
-            llm.chat(any(), any(), any(), any(), any(), any(), any())
+            llm.chat(any(), any(), any(), any(), any(), any(), any(), any(), any())
         }
     }
 
@@ -99,8 +100,9 @@ class ParallelScoringServiceTest {
         val llm = spyk(LLMService(mockk(relaxed = true), mockk(relaxed = true), mockk(relaxed = true)))
         val prompts = mutableListOf<String>()
         val replies = ArrayDeque(listOf("""{"score": 4, "confidence": NaN}""", "no score", """{"score": 3}"""))
-        coEvery { llm.chat(any(), any(), any(), any(), capture(prompts), any(), any()) } answers {
-            Result.success(LLMResult(replies.removeFirst(), 10, 10, "stop", "fake"))
+        coEvery { llm.chat(any(), any(), any(), any(), capture(prompts), any(), any(), any(), any()) } answers {
+            arg<UsageSink>(8)(10, 20) // what the real chat tells onUsage of each reply
+            Result.success(LLMResult(replies.removeFirst(), 10, 20, "stop", "fake"))
         }
 
         val success = ParallelScoringService(llm).scoreDocuments(
@@ -112,6 +114,8 @@ class ParallelScoringServiceTest {
         ).single() as ScoringResult.Success
 
         assertEquals(3, success.score)
+        assertEquals("all three replies are paid for, the unreadable ones too (#818)", 30, success.inputTokens)
+        assertEquals(60, success.outputTokens)
         val (first, second, third) = prompts
         assertFalse(first.contains(LLMService.JSON_CORRECTION_NOTE))
         // Appended to the user turn after a blank line, and kept on every later attempt
@@ -145,6 +149,6 @@ class ParallelScoringServiceTest {
 
         val success = results.single() as ScoringResult.Success
         assertEquals(4, success.score)
-        coVerify(exactly = 1) { llm.chat(any(), any(), any(), any(), any(), any(), any()) }
+        coVerify(exactly = 1) { llm.chat(any(), any(), any(), any(), any(), any(), any(), any(), any()) }
     }
 }

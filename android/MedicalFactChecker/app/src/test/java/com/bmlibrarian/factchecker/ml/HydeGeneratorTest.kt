@@ -38,7 +38,7 @@ class HydeGeneratorTest {
         val maxTokens = slot<Int>()
         val abstract = "word ".repeat(Constants.HYDE_TARGET_WORD_COUNT_MIN).trim()
         coEvery {
-            llmService.chat(any(), any(), any(), any(), any(), capture(maxTokens), any())
+            llmService.chat(any(), any(), any(), any(), any(), capture(maxTokens), any(), any(), any())
         } returns Result.success(LLMResult(abstract, 0, 0, "stop", "m"))
 
         val generated = HydeGenerator(llmService)

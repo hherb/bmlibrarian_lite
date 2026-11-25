@@ -20,6 +20,8 @@ package com.bmlibrarian.factchecker.ml
 
 import android.util.Log
 import com.bmlibrarian.factchecker.data.remote.llm.LLMService
+import com.bmlibrarian.factchecker.data.remote.llm.NO_USAGE
+import com.bmlibrarian.factchecker.data.remote.llm.UsageSink
 import com.bmlibrarian.factchecker.domain.model.LLMProvider
 import com.bmlibrarian.factchecker.util.Constants
 import javax.inject.Inject
@@ -68,13 +70,16 @@ class HydeGenerator @Inject constructor(
      * @param provider The LLM provider to use
      * @param apiKey The API key for authentication
      * @param model The model ID to use
+     * @param onUsage Told each answered request's token counts (#818), a reply
+     *   the abstract is not taken from too
      * @return The generated abstract, or null if generation fails
      */
     suspend fun generateHypotheticalAbstract(
         claim: String,
         provider: LLMProvider,
         apiKey: String,
-        model: String
+        model: String,
+        onUsage: UsageSink = NO_USAGE
     ): String? {
         return try {
             val prompt = buildPrompt(claim)
@@ -86,7 +91,8 @@ class HydeGenerator @Inject constructor(
                 systemPrompt = SYSTEM_PROMPT,
                 userPrompt = prompt,
                 maxTokens = Constants.LLM_HYDE_MAX_TOKENS,
-                temperature = 0.7 // Slightly higher temperature for creative generation
+                temperature = 0.7, // Slightly higher temperature for creative generation
+                onUsage = onUsage
             )
 
             if (result.isSuccess) {

@@ -47,24 +47,6 @@ class ConstantsTest {
         )
     }
 
-    @Test
-    fun `output estimates are positive and within their limits`() {
-        // Usage is recorded from these, so an estimate above its call's limit
-        // would record more than the call could have generated
-        val pairs = listOf(
-            Constants.LLM_QUERY_OUTPUT_ESTIMATE to Constants.LLM_QUERY_MAX_TOKENS,
-            Constants.LLM_QUERY_OUTPUT_ESTIMATE to Constants.LLM_ALTERNATIVE_QUERIES_MAX_TOKENS,
-            Constants.LLM_SCORING_OUTPUT_ESTIMATE to Constants.LLM_SCORING_MAX_TOKENS,
-            Constants.LLM_SCORING_OUTPUT_ESTIMATE to Constants.LLM_HYDE_MAX_TOKENS,
-            Constants.LLM_CITATION_OUTPUT_ESTIMATE to Constants.LLM_CITATION_MAX_TOKENS,
-            Constants.LLM_REPORT_OUTPUT_ESTIMATE to Constants.LLM_REPORT_MAX_TOKENS
-        )
-        for ((estimate, limit) in pairs) {
-            assertTrue("estimate $estimate must be positive", estimate > 0)
-            assertTrue("estimate $estimate must not exceed limit $limit", estimate <= limit)
-        }
-    }
-
     // ==================== Europe PMC Constants ====================
 
     @Test

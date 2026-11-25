@@ -111,7 +111,7 @@ class FactCheckWorkflowTransparencyTest {
         }
         coEvery { documentRepository.getCitationsBySessionSync(SESSION_ID) } returns
             listOf(CitationEntity(documentId = "relevant", passage = "A passage."))
-        coEvery { llmService.generateReport(any(), any(), any(), any(), any()) } returns
+        coEvery { llmService.generateReport(any(), any(), any(), any(), any(), any()) } returns
             Result.success(LLMService.ReportGeneration(verdict = "supported", summary = "S", report = "The analysis."))
 
         // Industry funding with unavailable data, no full text: high, with limited certainty.
