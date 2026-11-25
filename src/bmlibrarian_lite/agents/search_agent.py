@@ -37,7 +37,12 @@ from bmlibrarian_lite.pubmed import (
 )
 from ..storage import LiteStorage
 from ..config import LiteConfig
-from ..constants import SMART_SEARCH_MAX_TOKENS, SMART_SEARCH_TEMPERATURE
+from ..constants import (
+    QUERY_CONVERSION_TEMPERATURE,
+    SHORT_ANSWER_MAX_TOKENS,
+    SMART_SEARCH_MAX_TOKENS,
+    SMART_SEARCH_TEMPERATURE,
+)
 from ..data_models import LiteDocument, DocumentSource, SearchSession, SearchProvider
 from ..embeddings import LiteEmbedder
 from ..query_converter import LiteQueryConverter
@@ -121,7 +126,7 @@ class LiteSearchAgent(LiteBaseAgent):
         # Initialize lite query converter (simplified, focused queries)
         # Uses query_conversion task configuration
         self._query_converter = LiteQueryConverter(
-            llm_client=self.llm_client,
+            ask=self.convert_ask,
             model=self._get_model("query_conversion"),
         )
 
@@ -156,6 +161,30 @@ class LiteSearchAgent(LiteBaseAgent):
 
         logger.debug(f"Generated query: {query.query_string}")
         return query
+
+    def convert_ask(self, prompt: str) -> str:
+        """The question's own query: one JSON answer from the query-conversion model.
+
+        Through ``_chat``, so a cut answer is asked once more with a larger
+        limit and recorded, and one still cut raises instead of being parsed
+        as complete (#827).
+
+        Args:
+            prompt: The conversion request.
+
+        Returns:
+            The answer's text.
+
+        Raises:
+            TruncatedResponseError: The answer reached its token limit.
+            RefusedResponseError: The model declined to answer.
+        """
+        return self._chat(
+            [self._create_user_message(prompt)],
+            temperature=QUERY_CONVERSION_TEMPERATURE,
+            max_tokens=SHORT_ANSWER_MAX_TOKENS,
+            json_mode=True,
+        )
 
     def ask(self, prompt: str) -> str:
         """One JSON answer from the query-conversion model (smart search's alternative queries).

@@ -166,7 +166,7 @@ a git pin). Snapshot rows keep `run_status`/`run_deciding` set-once.
   queries (outgrew 1024 even without thinking), HyDE, citations, quality
   assessment, brief summary, 8192 a report; desktop
   `SHORT_ANSWER_`/`GENERATION_`/`REPORT_MAX_TOKENS`, measured maxima in
-  `tests/test_token_limits.py`. Open: #819. **Android records the replies' own
+  `tests/test_token_limits.py`. **Android records the replies' own
   token counts** (#818): every `LLMService` call takes an `onUsage` sink
   (`TokenTally::add`), told each paid request's tokens: an unparsed reply, a
   cut answer's retry and an empty or refused reply (`LLMResult.holdsAnswer`
@@ -177,10 +177,12 @@ a git pin). Snapshot rows keep `run_status`/`run_deciding` set-once.
   retry that fails keeps the cut answer; the usage is both requests'. Desktop:
   in `_chat`/`_chat_prose` (`_chat_response_retrying_cut`), never
   `_chat_response` (the benchmarks keep fixed limits; the interrogation
-  agent's query expansion calls it directly); `LLMResponse.max_tokens` None
-  never retries; on Ollama only within a configured `context_window`; every
-  cut goes to SQLite `cut_answers` (`cut_answers.set_recorder`, set by the GUI
-  and MCP server, reset by tests). Apps: `raisedLimit` in each
+  agent's query expansion calls it directly); the question's own query asks
+  through `LiteSearchAgent.convert_ask` (#827), so a still-cut one takes the
+  fallback query; `LLMResponse.max_tokens` None never retries; on Ollama
+  only within a configured `context_window`; every cut goes to SQLite
+  `cut_answers` (`cut_answers.set_recorder`, set by the GUI and MCP server,
+  reset by tests). Apps: `raisedLimit` in each
   `LLMService.chat`, no `room` cap (`num_ctx` is sized per request), the
   connection test passes `retryingCut: false`, a cut answer still left is only
   logged. **A cut answer with no text** (thinking took the limit) is asked
@@ -277,9 +279,11 @@ Open issues by family; each issue carries the detail. None blocks another.
   stage (spec §5) gets its own spec revision after that report. The shadow
   stage's parked follow-ups (untested paths, an unbounded queue, the wire
   contract fixture): **#815**.
-- **#829** (#822's review) a still-cut answer some apps parsers read as
-  complete; **#823** a refused desktop quality assessment reads as
-  unclassified (both reader-facing: maintainer's call).
+- **#831** (decided 2026-11-25, all three): up to three cut-answer retries,
+  the limit doubled up to the model's capacity, a still-cut answer failing
+  with its text (settles **#829**). **#823** a refused desktop quality
+  assessment reads as unclassified (maintainer's call). **#834** the apps'
+  unrecorded paid requests. **#835** a flaky Android wall-clock test.
 - **From the bmlib syncs.** PR #757's issues are fixed and unreleased (a
   0.6.1 is the maintainer's call; PRs #765–#767, #771, #774, #775). Still
   deferred: #768, #769 (apps' Ollama), #770 (prompts ask for null), #773

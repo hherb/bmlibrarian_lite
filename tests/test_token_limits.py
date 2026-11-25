@@ -5,6 +5,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from bmlibrarian_lite.agents.reporting_agent import LiteReportingAgent
+from bmlibrarian_lite.agents.search_agent import LiteSearchAgent
 from bmlibrarian_lite.benchmarking.runner import BenchmarkRunner
 from bmlibrarian_lite.config import BenchmarkModelConfig, LiteConfig
 from bmlibrarian_lite.constants import (
@@ -14,7 +15,6 @@ from bmlibrarian_lite.constants import (
 )
 from bmlibrarian_lite.data_models import Citation, Evaluator, LiteDocument
 from bmlibrarian_lite.llm.data_types import LLMResponse
-from bmlibrarian_lite.query_converter import LiteQueryConverter
 
 # The longest answer measured on the desktop's own prompts, Haiku 5.5 or Sonnet 5.5
 LONGEST_SCORE = 603
@@ -59,11 +59,13 @@ def test_a_named_limit_has_room_for_its_longest_answer(limit: int, longest: int)
 
 
 def test_query_conversion_sends_room_for_its_longest_answer() -> None:
-    """The converter passes its own limit, not the task's."""
+    """The search agent passes the converter's own limit, not the task's."""
     client = MagicMock()
     client.chat.return_value = LLMResponse(content='{"query": "x"}')
 
-    LiteQueryConverter(llm_client=client, model="anthropic:m").convert("Does aspirin prevent stroke?")
+    LiteSearchAgent(storage=MagicMock(), config=LiteConfig(), llm_client=client).convert_query(
+        "Does aspirin prevent stroke?"
+    )
 
     assert has_room(client.chat.call_args.kwargs["max_tokens"], LONGEST_QUERY)
 

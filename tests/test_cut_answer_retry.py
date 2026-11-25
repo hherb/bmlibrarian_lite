@@ -8,11 +8,13 @@ The benchmarks keep fixed limits: they call the client directly.
 
 import sqlite3
 from typing import Any
+from unittest.mock import MagicMock
 
 import pytest
 
 from bmlibrarian_lite import cut_answers
 from bmlibrarian_lite.agents.base import CUT_OFF_PROSE_NOTE, LiteBaseAgent
+from bmlibrarian_lite.agents.search_agent import LiteSearchAgent
 from bmlibrarian_lite.config import LiteConfig
 from bmlibrarian_lite.constants import CUT_ANSWER_RETRY_MAX_TOKENS
 from bmlibrarian_lite.cut_answers import CutAnswer, raised_limit
@@ -318,3 +320,40 @@ def test_the_benchmark_keeps_its_fixed_limit() -> None:
 
     assert len(client.calls) == 1
     assert scored.score == EvaluationErrorCode.RESPONSE_TOO_LARGE.value
+
+
+QUERY_ANSWER = '{"concepts": [{"name": "c", "mesh_terms": ["Aspirin"], "keywords": []}]}'
+
+
+def search_agent_on(client: Client) -> LiteSearchAgent:
+    """A search agent whose query conversion runs on Anthropic, calling *client*."""
+    config = LiteConfig._from_dict({"models": {"tasks": {"query_conversion": {
+        "provider": "anthropic", "model": "test-model", "max_tokens": LIMIT,
+    }}}})
+    return LiteSearchAgent(storage=MagicMock(), config=config, llm_client=client)  # type: ignore[arg-type]
+
+
+class TestTheQuestionsOwnQuery:
+    """The query converter asks through ``_chat``, so its cut answers are retried too (#827)."""
+
+    def test_a_cut_query_answer_is_asked_again_and_recorded(self, recorded: list[CutAnswer]) -> None:
+        """The retry's answer makes the query; the cut is recorded under its task."""
+        client = Client(cut("{", LIMIT, LIMIT), finished(QUERY_ANSWER, 2 * LIMIT))
+
+        query = search_agent_on(client).convert_query("Does aspirin prevent stroke?")
+
+        assert client.limits == [LIMIT, 2 * LIMIT]
+        assert query.query_string.startswith('(("Aspirin"[mh]))')
+        assert [(row.task_id, row.retry_cut) for row in recorded] == [("query_conversion", False)]
+
+    def test_a_query_answer_still_cut_is_never_parsed(
+        self, recorded: list[CutAnswer], caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Even one that parses: the fallback query is used, and the log says why."""
+        client = Client(cut(QUERY_ANSWER, LIMIT, LIMIT), cut(QUERY_ANSWER, 2 * LIMIT, 2 * LIMIT))
+
+        query = search_agent_on(client).convert_query("Does aspirin prevent stroke?")
+
+        assert query.generation_model == "fallback"
+        assert "reached its token limit" in caplog.text
+        assert [row.retry_cut for row in recorded] == [True]
