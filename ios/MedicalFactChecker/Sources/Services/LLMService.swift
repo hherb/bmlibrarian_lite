@@ -128,13 +128,13 @@ actor LLMService {
 
     /// Send a chat completion request to the LLM with automatic retry.
     ///
-    /// Retries up to `maxRetries` times with exponential backoff for transient failures
+    /// Tries up to `maxRetries` times with exponential backoff for transient failures
     /// (network errors, rate limits, server errors). An answer cut at its token
     /// limit is asked once more with the limit ``raisedLimit(finishReason:outputTokens:maxTokens:)``
     /// allows (#822, the desktop's #825), and the retry's answer is returned, cut
-    /// or not; a retry that fails is logged and the cut answer returned. A cut
-    /// answer is still returned as written: a JSON one then fails to parse at its
-    /// caller, as before.
+    /// or not. The retry is one attempt: one that fails (a twice-as-long answer
+    /// can pass the request timeout) is logged and the cut answer returned. A cut
+    /// answer is returned as written, and its caller reads it as before (#829).
     ///
     /// - Parameters:
     ///   - messages: Array of chat messages.
@@ -158,14 +158,14 @@ actor LLMService {
               )
         else {
             if Self.isCut(reply.finishReason) {
-                print("[LLMService] The answer from \(model) stopped at its token limit (\(reply.usage.outputTokens) of \(maxTokens) tokens)")
+                print("[LLMService] The answer from \(model) stopped at a length limit, not asked again (\(reply.usage.outputTokens) of \(maxTokens) tokens)")
             }
             return (reply.content, reply.usage)
         }
         print("[LLMService] The answer from \(model) reached its token limit (\(maxTokens)); asking once more with \(raised)")
         let retry: (content: String, usage: LLMUsage, finishReason: String?)
         do {
-            retry = try await chatRetryingFailures(messages: messages, temperature: temperature, maxTokens: raised)
+            retry = try await chatRetryingFailures(messages: messages, temperature: temperature, maxTokens: raised, attempts: 1)
         } catch {
             try Task.checkCancellation()
             print("[LLMService] Asking \(model) once more with \(raised) failed (\(error.localizedDescription)); keeping the cut answer")
@@ -195,7 +195,8 @@ actor LLMService {
     /// The desktop's `cut_answers.raised_limit` rule. An answer that stopped
     /// short of its limit ran out of context window, which a larger limit does
     /// not change; a reply that states no token count cannot show it reached
-    /// its limit either.
+    /// its limit either. Without the desktop's `room` cap: Ollama's `num_ctx` is
+    /// sized from each request's own limit (`OllamaContext.numCtx`).
     ///
     /// - Parameters:
     ///   - finishReason: Why the answer stopped.
@@ -209,16 +210,17 @@ actor LLMService {
         return raised > maxTokens ? raised : nil
     }
 
-    /// One answer, retried up to `maxRetries` times with exponential backoff
-    /// for transient failures; a cut answer is returned as it is.
+    /// One answer, tried up to `attempts` times with exponential backoff for
+    /// transient failures; a cut answer is returned as it is.
     private func chatRetryingFailures(
         messages: [ChatMessage],
         temperature: Double,
-        maxTokens: Int
+        maxTokens: Int,
+        attempts: Int = LLMService.maxRetries
     ) async throws -> (content: String, usage: LLMUsage, finishReason: String?) {
         var lastError: Error?
 
-        for attempt in 0..<Self.maxRetries {
+        for attempt in 0..<attempts {
             do {
                 return try await performChatRequest(
                     messages: messages,
@@ -235,7 +237,7 @@ actor LLMService {
                 }
 
                 // Don't retry after the last attempt
-                if attempt < Self.maxRetries - 1 {
+                if attempt < attempts - 1 {
                     let delay = calculateBackoffDelay(attempt: attempt)
                     print("[LLMService] Attempt \(attempt + 1) failed: \(error.localizedDescription). Retrying in \(String(format: "%.1f", delay))s...")
                     try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
@@ -243,7 +245,7 @@ actor LLMService {
             }
         }
 
-        print("[LLMService] All \(Self.maxRetries) attempts failed")
+        print("[LLMService] All \(attempts) attempts failed")
         throw lastError ?? LLMError.invalidResponse
     }
 

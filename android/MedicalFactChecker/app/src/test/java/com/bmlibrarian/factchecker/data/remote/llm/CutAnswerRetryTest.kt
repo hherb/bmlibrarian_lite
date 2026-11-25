@@ -8,11 +8,15 @@ package com.bmlibrarian.factchecker.data.remote.llm
 
 import android.util.Log
 import com.bmlibrarian.factchecker.domain.model.LLMProvider
+import com.bmlibrarian.factchecker.util.OllamaContext
 import io.mockk.coEvery
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.mockkStatic
 import io.mockk.unmockkStatic
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import okhttp3.ResponseBody.Companion.toResponseBody
 import org.junit.After
@@ -27,8 +31,10 @@ class CutAnswerRetryTest {
 
     private lateinit var openAIApi: OpenAIApi
     private lateinit var anthropicApi: AnthropicApi
+    private lateinit var ollamaApi: OllamaApi
     private lateinit var service: LLMService
     private val asked = mutableListOf<Int>()
+    private val requests = mutableListOf<OpenAIChatRequest>()
 
     @Before
     fun setup() {
@@ -36,7 +42,8 @@ class CutAnswerRetryTest {
         every { Log.w(any<String>(), any<String>()) } returns 0
         openAIApi = mockk()
         anthropicApi = mockk()
-        service = LLMService(openAIApi, anthropicApi, mockk())
+        ollamaApi = mockk()
+        service = LLMService(openAIApi, anthropicApi, ollamaApi)
     }
 
     @After
@@ -45,6 +52,7 @@ class CutAnswerRetryTest {
     private fun openAIReplies(vararg replies: Response<OpenAIChatResponse>) {
         val queue = ArrayDeque(replies.toList())
         coEvery { openAIApi.chatCompletion(any(), any(), any()) } answers {
+            requests += thirdArg<OpenAIChatRequest>()
             asked += thirdArg<OpenAIChatRequest>().maxTokens
             queue.removeFirst()
         }
@@ -98,6 +106,72 @@ class CutAnswerRetryTest {
     }
 
     @Test
+    fun `a retry that fails transiently is tried once, not backed off`() = runTest {
+        // a twice-as-long answer can pass the read timeout: re-sending it only adds cost
+        val unavailable = { Response.error<OpenAIChatResponse>(503, "{}".toResponseBody()) }
+        openAIReplies(answer("cut", "length", 2048), unavailable(), unavailable(), unavailable())
+
+        assertEquals("cut", ask().getOrThrow().content)
+        assertEquals(listOf(2048, 4096), asked)
+    }
+
+    @Test
+    fun `the retry asks what the answer was asked, with only the limit raised`() = runTest {
+        openAIReplies(answer("cut", "length", 2048), answer("whole", "stop", 3000))
+
+        service.chat(
+            provider = LLMProvider.OPENAI, apiKey = "k", model = "m", systemPrompt = "rubric", userPrompt = "paper",
+            maxTokens = 2048, temperature = 0.3
+        )
+
+        assertEquals(requests[0].copy(maxTokens = 4096), requests[1])
+    }
+
+    @Test
+    fun `a cancelled retry is a cancellation, not the cut answer`() = runTest {
+        var calls = 0
+        coEvery { openAIApi.chatCompletion(any(), any(), any()) } coAnswers {
+            if (calls++ == 0) answer("cut", "length", 2048) else awaitCancellation()
+        }
+        var got: Result<LLMResult>? = null
+
+        val job = launch { got = ask() }
+        runCurrent()
+        job.cancel()
+        job.join()
+
+        assertNull("a stopped run returns no answer", got)
+    }
+
+    @Test
+    fun `Ollama's done_reason length is a cut, asked again with a context that holds it`() = runTest {
+        val sent = mutableListOf<OllamaChatRequest>()
+        val queue = ArrayDeque(listOf("length" to 2048, "stop" to 3000))
+        coEvery { ollamaApi.chat(any(), any()) } answers {
+            sent += secondArg<OllamaChatRequest>()
+            val (reason, tokens) = queue.removeFirst()
+            Response.success(
+                OllamaChatResponse(
+                    message = OpenAIChatMessage("assistant", reason),
+                    promptEvalCount = 100,
+                    evalCount = tokens,
+                    doneReason = reason
+                )
+            )
+        }
+
+        val result = service.chat(
+            provider = LLMProvider.OLLAMA, apiKey = "", model = "qwen3", systemPrompt = "s", userPrompt = "u",
+            maxTokens = 2048
+        ).getOrThrow()
+
+        assertEquals("stop", result.content)
+        assertEquals(listOf(2048, 4096), sent.map { it.options.numPredict })
+        assertEquals(OllamaContext.numCtx(listOf("s", "u"), 4096), sent[1].options.numCtx)
+        assertEquals(5048, result.outputTokens)
+    }
+
+    @Test
     fun `an answer cut short of its limit is not asked again`() = runTest {
         // the context window ran out: a larger limit does not change that
         openAIReplies(answer("cut", "length", 900))
@@ -140,12 +214,15 @@ class CutAnswerRetryTest {
 
         assertEquals("end_turn", result.content)
         assertEquals(listOf(2048, 4096), limits)
+        assertEquals("both requests are paid for", 200, result.inputTokens)
+        assertEquals(5048, result.outputTokens)
     }
 
     @Test
     fun `the raised limit follows the desktop rule`() {
         assertEquals(4096, LLMService.raisedLimit("length", 2048, 2048))
         assertEquals(4096, LLMService.raisedLimit("max_tokens", 2048, 2048))
+        assertEquals("a count past the limit is a cut", 4096, LLMService.raisedLimit("length", 2049, 2048))
         assertEquals(16384, LLMService.raisedLimit("length", 8192, 8192))
         assertEquals("capped", 16384, LLMService.raisedLimit("length", 12000, 12000))
         assertNull("no larger limit", LLMService.raisedLimit("length", 16384, 16384))

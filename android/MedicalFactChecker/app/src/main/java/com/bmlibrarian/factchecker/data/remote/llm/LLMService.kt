@@ -67,9 +67,10 @@ class LLMService @Inject constructor(
      * @return Result containing LLMResult on success, or LLMError on failure. An
      *   answer cut at its token limit is asked once more with the limit [raisedLimit]
      *   allows (#822, the desktop's #825); the retry's answer is returned, cut or
-     *   not, with both requests' tokens. A retry that fails is logged and the cut
-     *   answer returned. A cut answer is still returned as written: a JSON one then
-     *   fails to parse at its caller, as before.
+     *   not, with both requests' tokens. The retry is one attempt: one that fails
+     *   (a twice-as-long answer can pass the read timeout) is logged and the cut
+     *   answer returned. A cut answer is returned as written, and its caller reads
+     *   it as before (#829).
      */
     suspend fun chat(
         provider: LLMProvider,
@@ -86,12 +87,12 @@ class LLMService @Inject constructor(
         val raised = raisedLimit(answer.finishReason, answer.outputTokens, maxTokens)
         if (!retryingCut || raised == null) {
             if (isCut(answer.finishReason)) {
-                Log.w(TAG, "The answer from $model stopped at its token limit (${answer.outputTokens} of $maxTokens tokens)")
+                Log.w(TAG, "The answer from $model stopped at a length limit, not asked again (${answer.outputTokens} of $maxTokens tokens)")
             }
             return reply
         }
         Log.w(TAG, "The answer from $model reached its token limit ($maxTokens); asking once more with $raised")
-        val retried = chatRetryingFailures(provider, apiKey, model, systemPrompt, userPrompt, raised, temperature)
+        val retried = chatRetryingFailures(provider, apiKey, model, systemPrompt, userPrompt, raised, temperature, retries = 0)
         val retry = retried.getOrElse { e ->
             currentCoroutineContext().ensureActive()
             Log.w(TAG, "Asking $model once more with $raised failed (${e.message}); keeping the cut answer")
@@ -109,8 +110,8 @@ class LLMService @Inject constructor(
     }
 
     /**
-     * One answer, retried with exponential backoff for transient failures; a cut
-     * answer is returned as it is.
+     * One answer, retried up to [retries] times with exponential backoff for
+     * transient failures; a cut answer is returned as it is.
      */
     private suspend fun chatRetryingFailures(
         provider: LLMProvider,
@@ -119,11 +120,12 @@ class LLMService @Inject constructor(
         systemPrompt: String,
         userPrompt: String,
         maxTokens: Int,
-        temperature: Double
+        temperature: Double,
+        retries: Int = Constants.NETWORK_MAX_RETRIES
     ): Result<LLMResult> {
         return try {
             NetworkRetry.withExponentialBackoff(
-                maxRetries = Constants.NETWORK_MAX_RETRIES,
+                maxRetries = retries,
                 shouldRetry = { e -> shouldRetryError(e) }
             ) {
                 if (provider.usesAnthropicFormat) {
@@ -624,6 +626,8 @@ class LLMService @Inject constructor(
          * by the desktop's `cut_answers.raised_limit` rule. An answer that stopped
          * short of its limit ran out of context window, which a larger limit does not
          * change; a reply that states no token count cannot show it reached its limit.
+         * Without the desktop's `room` cap: Ollama's `num_ctx` is sized from each
+         * request's own limit ([OllamaContext.numCtx]).
          *
          * @param finishReason Why the answer stopped
          * @param outputTokens The tokens it generated, thinking included
