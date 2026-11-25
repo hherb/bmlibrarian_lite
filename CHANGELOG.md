@@ -71,6 +71,14 @@ apps additionally carry their own store version tags (`swift_*`, `appstore_*`).
   (Android's scores from 500); Android's citations rise from 1000 and its
   report from 2000. Only the tokens generated are billed, and Android's
   recorded usage figures do not change (#818).
+- **An answer cut at its token limit is asked once more with twice the
+  limit (#825 desktop, #822 apps).** Only an answer that generated its whole
+  limit is asked again, capped at 16,384 tokens. An answer cut short of its
+  limit ran out of context window, which a larger limit would not change.
+  Since #830 this includes an answer with no text at all, where a thinking
+  model spent the whole limit thinking. Before, the apps failed it at once
+  (iOS re-sent it three times at the same limit). If the retry is also cut
+  with no text, it now fails with an error that names the limit.
 - **Desktop: Claude 5.5's answers are no longer cut off (#821).** Measured
   with the desktop's own prompts on Claude Haiku 5.5 and Sonnet 5.5:
   - Every citation call on a full-text window outgrew its limit of 512, on
