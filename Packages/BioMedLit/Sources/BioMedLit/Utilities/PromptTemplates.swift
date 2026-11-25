@@ -87,21 +87,25 @@ public enum PromptTemplates {
     /// abstract that would answer the claim, then using its embedding for
     /// comparison instead of the short claim text.
     ///
+    /// Worded as a search aid, not a study to invent: Android's prompts, asking
+    /// alike for "a real published study" with numbers, were refused 2 of 20
+    /// times by Claude Haiku 5.5; none of iOS's 10 calls were (#819).
+    ///
     /// - Parameter claim: The medical claim to generate a hypothetical abstract for.
     /// - Returns: Formatted prompt string.
     public static func hydeGeneration(claim: String) -> String {
         """
-        Generate a hypothetical medical research abstract that would directly address and provide evidence for the following claim or question.
+        Write a short passage (150-250 words) of the kind a biomedical research abstract answering the following claim or question would contain. It is used only to find related papers by text similarity, never shown or cited as evidence.
 
         Claim: \(claim)
 
-        Write a realistic abstract (150-250 words) that:
-        - Has a clear objective related to the claim
-        - Describes methods briefly
-        - States specific findings with numbers/percentages where appropriate
-        - Draws a conclusion about the claim
+        The passage should:
+        - State the research question the claim raises
+        - Name the study designs, populations, interventions and outcomes such research would use
+        - Describe the kind of findings that would bear on the claim, in words, without numbers or statistics
+        - Use the medical terminology a published abstract on this topic would use
 
-        Output ONLY the abstract text, no title or labels. Write as if this were a real published study.
+        Output ONLY the passage, no title or labels.
         """
     }
 

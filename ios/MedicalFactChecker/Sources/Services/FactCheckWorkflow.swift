@@ -3073,6 +3073,8 @@ final class FactCheckWorkflow {
     ///
     /// - Parameter claim: The medical claim to generate a hypothetical document for.
     /// - Returns: A hypothetical abstract text.
+    /// - Throws: `LLMError.emptyResponse` when the answer holds no text, so the
+    ///   caller scores against the claim, as for any other failure.
     private func generateHypotheticalDocument(for claim: String) async throws -> String {
         guard let llmService = llmService else {
             throw LLMError.invalidConfiguration("LLM service not initialized")
@@ -3091,7 +3093,15 @@ final class FactCheckWorkflow {
         // Record usage for budget tracking
         recordUsage(usage, operationType: "hyde_generation")
 
-        return response.trimmingCharacters(in: .whitespacesAndNewlines)
+        return try Self.hypotheticalDocument(fromAnswer: response)
+    }
+
+    /// The HyDE answer's text, trimmed; an empty one throws `LLMError.emptyResponse`:
+    /// embedded as the document it would score every paper against nothing (#819).
+    nonisolated static func hypotheticalDocument(fromAnswer answer: String) throws -> String {
+        let text = answer.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { throw LLMError.emptyResponse }
+        return text
     }
 
     /// Extract citations from relevant documents using parallel processing.
@@ -3760,7 +3770,8 @@ final class FactCheckWorkflow {
     ///
     /// - Returns: The queries, or an empty list when no answer held one.
     /// - Throws: ``SmartSearchError/queryGenerationFailed`` when the request to
-    ///   the model failed, which costs nothing and leaves smart search available.
+    ///   the model failed, which costs nothing and leaves smart search available;
+    ///   ``SmartSearchError/refused`` when the model declined to answer (#819).
     private func generateAlternativeQueries() async throws -> [StructuredQuery] {
         guard let session = session, let llmService = llmService else { return [] }
 
@@ -3794,8 +3805,14 @@ final class FactCheckWorkflow {
                 // A stopped run, whatever the request threw as it was
                 // abandoned: not a reason to tell the user smart search failed
                 throw CancellationError()
+            } catch LLMError.refused {
+                // Answered, not failed: asked again the model would decline again.
+                // Its tokens go unrecorded, as other failed replies' do (#834)
+                throw SmartSearchError.refused
             } catch {
                 // A request that failed asks nothing and pays nothing
+                // The type only: provider text can carry a credential, as on the desktop (#330)
+                logger.warning("Alternative queries could not be asked for (\(String(describing: type(of: error))))")
                 throw SmartSearchError.queryGenerationFailed
             }
 
@@ -3838,7 +3855,16 @@ final class FactCheckWorkflow {
 
         // Generate alternative structured queries
         updateProgress(.searchingPubMed, "Generating alternative search strategies...")
-        let alternatives = try await generateAlternativeQueries()
+        let alternatives: [StructuredQuery]
+        do {
+            alternatives = try await generateAlternativeQueries()
+        } catch SmartSearchError.refused {
+            // Marked as tried, as an unusable answer is: the workflow does not ask
+            // and pay again on its own
+            session.smartSearchEnabled = true
+            try? modelContext.save()
+            throw SmartSearchError.refused
+        }
 
         guard !alternatives.isEmpty else {
             // No answer held a usable query: marked as tried, so the workflow
@@ -4360,6 +4386,11 @@ enum SmartSearchError: LocalizedError, Equatable {
     /// Smart search stays available to try again.
     case queryGenerationFailed
 
+    /// The model declined to propose alternative queries (#819).
+    ///
+    /// Smart search is marked as tried, as for ``noUsableQuery``.
+    case refused
+
     var errorDescription: String? {
         switch self {
         case .noUsableQuery:
@@ -4368,6 +4399,10 @@ enum SmartSearchError: LocalizedError, Equatable {
         case .queryGenerationFailed:
             return "Alternative searches could not be run: the model could not be asked for them. "
                 + "Check the model and its key in Settings."
+        case .refused:
+            // The desktop's ANSWER_REFUSED_TEXT, with the app's name for the setting
+            return "The model declined to propose alternative search queries, "
+                + "so no alternative search was run. Another model, chosen in Settings, may answer."
         }
     }
 }

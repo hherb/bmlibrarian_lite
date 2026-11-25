@@ -74,7 +74,8 @@ class LLMService @Inject constructor(
      *   (a twice-as-long answer can pass the read timeout) is logged and the cut
      *   answer returned. A cut answer is returned as written, and its caller reads
      *   it as before (#829); one with no text (thinking took the limit) is asked
-     *   again the same way, and still textless it fails (#830).
+     *   again the same way, and still textless it fails (#830). A reply that
+     *   declined to answer, the retry's too, fails with [LLMError.RefusedError] (#819).
      */
     suspend fun chat(
         provider: LLMProvider,
@@ -100,6 +101,8 @@ class LLMService @Inject constructor(
         val retried = chatRetryingFailures(provider, apiKey, model, systemPrompt, userPrompt, raised, temperature, onUsage, retries = 0)
         val retry = retried.getOrElse { e ->
             currentCoroutineContext().ensureActive()
+            // A refusal is an answer, not a failed request: the desktop raises it too
+            if (e is LLMError.RefusedError) return retried
             Log.w(TAG, "Asking $model once more with $raised failed (${e.message}); keeping the cut answer")
             return written(reply, model)
         }
@@ -173,7 +176,10 @@ class LLMService @Inject constructor(
             Log.w(TAG, "The reply from $model stated no token usage; nothing is recorded for it")
         }
         onUsage(answer.inputTokens, answer.outputTokens)
-        // Not retried, as before: EmptyResponseError is not retryable
+        // Neither is retried: RefusedError and EmptyResponseError are not retryable
+        if (isRefused(answer.finishReason)) {
+            return Result.failure(LLMError.RefusedError("The model $model declined to answer"))
+        }
         return if (answer.holdsAnswer) reply else Result.failure(LLMError.EmptyResponseError())
     }
 
@@ -269,7 +275,8 @@ class LLMService @Inject constructor(
      * @param onUsage Told each answered request's token counts (#818)
      * @return The alternative queries; an empty list when the model answered
      *   with no query that can be used, or with nothing, which asking again may
-     *   mend; or a failure when the request itself failed
+     *   mend; or a failure when the request itself failed, or the model declined
+     *   to answer ([LLMError.RefusedError], #819)
      */
     suspend fun generateAlternativeQueries(
         provider: LLMProvider,
@@ -540,48 +547,6 @@ class LLMService @Inject constructor(
         }
     }
 
-    /**
-     * Generate a hypothetical document for HyDE embedding.
-     *
-     * @param provider The LLM provider configuration
-     * @param apiKey The API key for authentication
-     * @param model The model ID to use
-     * @param claim The medical claim
-     * @param onUsage Told each answered request's token counts (#818)
-     * @return Result containing the hypothetical abstract text
-     */
-    suspend fun generateHypotheticalDocument(
-        provider: LLMProvider,
-        apiKey: String,
-        model: String,
-        claim: String,
-        onUsage: UsageSink = NO_USAGE
-    ): Result<String> {
-        val systemPrompt = """
-            You are generating a hypothetical abstract for a medical research paper that would
-            directly address and provide evidence for the given claim. Write a realistic abstract
-            in the style of a peer-reviewed medical journal article.
-
-            The abstract should be 150-200 words and include:
-            - Background/objective
-            - Methods (briefly)
-            - Results (with plausible but hypothetical numbers)
-            - Conclusion
-
-            Return ONLY the abstract text, nothing else.
-        """.trimIndent()
-
-        return chat(
-            provider = provider,
-            apiKey = apiKey,
-            model = model,
-            systemPrompt = systemPrompt,
-            userPrompt = "Generate a hypothetical abstract for: $claim",
-            maxTokens = Constants.LLM_HYDE_MAX_TOKENS,
-            onUsage = onUsage
-        ).map { it.content.trim() }
-    }
-
     // ==================== Private Implementation ====================
 
     /**
@@ -667,6 +632,13 @@ class LLMService @Inject constructor(
          */
         internal fun isCut(finishReason: String?): Boolean =
             finishReason == "length" || finishReason == "max_tokens"
+
+        /**
+         * Whether a finish reason says the model declined to answer (#819):
+         * `refusal` (Anthropic's native name) or `content_filter` (chat completions).
+         */
+        internal fun isRefused(finishReason: String?): Boolean =
+            finishReason == "refusal" || finishReason == "content_filter"
 
         /**
          * The limit to ask a cut answer again with, or null not to ask again (#822),

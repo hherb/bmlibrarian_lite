@@ -38,7 +38,7 @@ import javax.inject.Singleton
  * Reference: Gao et al., "Precise Zero-Shot Dense Retrieval without Relevance Labels"
  *
  * Features:
- * - Generates synthetic scientific abstracts from medical claims
+ * - Generates a passage in the vocabulary of a scientific abstract from a medical claim
  * - Validates and cleans generated content
  * - Low additional cost (one LLM call per session)
  * - Can be cached and reused for smart search alternatives
@@ -51,20 +51,23 @@ class HydeGenerator @Inject constructor(
     companion object {
         private const val TAG = "HydeGenerator"
 
-        /** System prompt for HyDE abstract generation. */
+        /**
+         * System prompt for HyDE passage generation. Worded as a search aid, not a
+         * study to invent: asked for "a real published study abstract" with
+         * statistics, Claude Haiku 5.5 refused 1 of 10 (#819).
+         */
         private val SYSTEM_PROMPT = """
-            You are a scientific writing assistant specializing in biomedical research.
-            Your task is to write hypothetical scientific abstracts that would address
-            medical claims or questions. Write in a formal, academic style appropriate
-            for peer-reviewed publications.
+            You help search the biomedical literature. You write short passages in the
+            vocabulary of research abstracts; they are used only to find related papers
+            by text similarity, never shown or cited as evidence.
         """.trimIndent()
     }
 
     /**
      * Generate a hypothetical abstract that would address the given claim.
      *
-     * The generated abstract mimics the structure of real scientific abstracts
-     * and is used to improve embedding-based document retrieval.
+     * The passage uses an abstract's vocabulary, without numbers, and is used
+     * only to improve embedding-based document retrieval.
      *
      * @param claim The medical claim to generate a hypothetical abstract for
      * @param provider The LLM provider to use
@@ -117,17 +120,14 @@ class HydeGenerator @Inject constructor(
     private fun buildPrompt(claim: String): String = """
         Given the medical claim: "$claim"
 
-        Write a hypothetical abstract (${Constants.HYDE_TARGET_WORD_COUNT_MIN}-${Constants.HYDE_TARGET_WORD_COUNT_MAX} words) of a scientific study that would directly address this claim.
+        Write a short passage (${Constants.HYDE_TARGET_WORD_COUNT_MIN}-${Constants.HYDE_TARGET_WORD_COUNT_MAX} words) of the kind an abstract answering this claim would contain:
+        - The research question the claim raises
+        - The study designs, populations, interventions and outcomes such research would use
+        - The kind of findings that would bear on the claim, in words, without numbers or statistics
 
-        Include typical abstract sections:
-        - **Background**: Why this topic matters
-        - **Methods**: Study design and participants
-        - **Results**: Key findings with statistics
-        - **Conclusion**: What the evidence suggests
+        Use the medical terminology a published abstract on this topic would use.
 
-        Use medical terminology appropriate for a peer-reviewed publication. Write as if this is a real published study abstract.
-
-        Output ONLY the abstract text, no headings or labels.
+        Output ONLY the passage, no headings or labels.
     """.trimIndent()
 
     /**
