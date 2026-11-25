@@ -66,7 +66,7 @@ class LLMService @Inject constructor(
      * @param retryingCut False keeps the limit fixed (the connection test's ten tokens)
      * @param onUsage Told each answered request's token counts as the reply states
      *   them (#818), a retry's too, and an answer that then fails (unparsed, cut
-     *   before it wrote anything) as well: its tokens were spent
+     *   before it wrote anything, empty or refused) as well: its tokens were spent
      * @return Result containing LLMResult on success, or LLMError on failure. An
      *   answer cut at its token limit is asked once more with the limit [raisedLimit]
      *   allows (#822, the desktop's #825); the retry's answer is returned, cut or
@@ -132,7 +132,7 @@ class LLMService @Inject constructor(
     /**
      * One answer, retried up to [retries] times with exponential backoff for
      * transient failures; a cut answer is returned as it is. [onUsage] is told
-     * the answer's tokens.
+     * the reply's tokens, a reply that holds no answer's too: it was paid for.
      */
     private suspend fun chatRetryingFailures(
         provider: LLMProvider,
@@ -168,7 +168,13 @@ class LLMService @Inject constructor(
                 )
             )
         }
-        return reply.onSuccess { onUsage(it.inputTokens, it.outputTokens) }
+        val answer = reply.getOrElse { return reply }
+        if (answer.inputTokens == 0 && answer.outputTokens == 0) {
+            Log.w(TAG, "The reply from $model stated no token usage; nothing is recorded for it")
+        }
+        onUsage(answer.inputTokens, answer.outputTokens)
+        // Not retried, as before: EmptyResponseError is not retryable
+        return if (answer.holdsAnswer) reply else Result.failure(LLMError.EmptyResponseError())
     }
 
     /**
@@ -643,7 +649,7 @@ class LLMService @Inject constructor(
         val response = ollamaApi.chat("${OllamaContext.nativeRoot(provider.baseUrl)}/api/chat", request)
         if (response.isSuccessful) {
             val body = response.body() ?: throw LLMError.EmptyResponseError()
-            return Result.success(LLMResult.fromOllama(body) ?: throw LLMError.EmptyResponseError())
+            return Result.success(LLMResult.fromOllama(body))
         }
         val errorBody = response.errorBody()?.string()
         val reason = errorBody?.let { ollamaError(it) } ?: response.message()
@@ -847,13 +853,7 @@ class LLMService @Inject constructor(
     private fun handleOpenAIResponse(response: Response<OpenAIChatResponse>): Result<LLMResult> {
         if (response.isSuccessful) {
             val body = response.body()
-            if (body != null) {
-                val result = LLMResult.fromOpenAI(body)
-                if (result != null) {
-                    return Result.success(result)
-                }
-                throw LLMError.EmptyResponseError()
-            }
+            if (body != null) return Result.success(LLMResult.fromOpenAI(body))
             throw LLMError.EmptyResponseError()
         } else {
             val errorBody = response.errorBody()?.string()
@@ -867,13 +867,7 @@ class LLMService @Inject constructor(
     private fun handleAnthropicResponse(response: Response<AnthropicMessagesResponse>): Result<LLMResult> {
         if (response.isSuccessful) {
             val body = response.body()
-            if (body != null) {
-                val result = LLMResult.fromAnthropic(body)
-                if (result != null) {
-                    return Result.success(result)
-                }
-                throw LLMError.EmptyResponseError()
-            }
+            if (body != null) return Result.success(LLMResult.fromAnthropic(body))
             throw LLMError.EmptyResponseError()
         } else {
             val errorBody = response.errorBody()?.string()

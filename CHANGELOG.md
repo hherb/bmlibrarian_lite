@@ -75,9 +75,10 @@ apps additionally carry their own store version tags (`swift_*`, `appstore_*`).
   figure per call (256 for queries, 250 for a score or HyDE abstract, 500 for
   a citation window, 2000 for a report). The usage screen, run costs and the
   run budget now read the token counts each reply states, thinking included.
-  An unreadable reply that is asked again is counted too, as is a cut answer's
-  retry. On Claude 5.5 an alternative-queries call was recorded as 256 tokens
-  but generates about 1,000–1,300.
+  An unreadable reply that is asked again is counted too, as are a cut
+  answer's retry and an empty or refused reply: all were paid for. On Claude
+  5.5 an alternative-queries call was recorded as 256 tokens but generates
+  about 1,000–1,300.
 - **An answer cut at its token limit is asked once more with twice the
   limit (#825 desktop, #822 apps).** Only an answer that generated its whole
   limit is asked again, capped at 16,384 tokens. An answer cut short of its

@@ -2671,13 +2671,15 @@ class FactCheckWorkflow @Inject constructor(
     }
 
     /**
-     * Record API usage for budget tracking.
+     * Record API usage for budget tracking; nothing when no reply stated any
+     * tokens (#818): a request that failed before an answer costs nothing.
      */
     private suspend fun recordUsage(
         operation: String,
         inputTokens: Int,
         outputTokens: Int
     ) {
+        if (inputTokens == 0 && outputTokens == 0) return
         val session = currentSession ?: return
         val model = settingsRepository.getLlmModel()
         val providerId = settingsRepository.getLlmProvider()
@@ -2745,15 +2747,13 @@ class FactCheckWorkflow @Inject constructor(
     }
 
     /**
-     * Record what [tokens] counted, when any request stated tokens (#818): a
-     * request that failed before an answer costs nothing.
+     * Record what [tokens] counted (#818).
      *
      * @param operation The operation name for the usage table
      * @param tokens The task's requests' real token counts
      */
-    private suspend fun recordUsage(operation: String, tokens: TokenTally) {
-        if (!tokens.isEmpty) recordUsage(operation, tokens.inputTokens, tokens.outputTokens)
-    }
+    private suspend fun recordUsage(operation: String, tokens: TokenTally) =
+        recordUsage(operation, tokens.inputTokens, tokens.outputTokens)
 
     /**
      * Build the references section for the report.

@@ -34,8 +34,10 @@ class ParallelScoringServiceTest {
 
     private fun llmAnswering(content: String): LLMService {
         val llm = spyk(LLMService(mockk(relaxed = true), mockk(relaxed = true), mockk(relaxed = true)))
-        coEvery { llm.chat(any(), any(), any(), any(), any(), any(), any(), any(), any()) } returns
+        coEvery { llm.chat(any(), any(), any(), any(), any(), any(), any(), any(), any()) } answers {
+            arg<UsageSink>(8)(10, 10) // what the real chat tells onUsage of each reply
             Result.success(LLMResult(content, 10, 10, "stop", "fake"))
+        }
         return llm
     }
 
@@ -64,6 +66,9 @@ class ParallelScoringServiceTest {
 
         assertEquals(1, results.size)
         assertTrue(results[0].toString(), results[0] is ScoringResult.ParseFailure)
+        // every unreadable reply was paid for (#818)
+        assertEquals(10 * ParallelScoringService.MAX_PARSE_RETRIES, results[0].inputTokens)
+        assertEquals(10 * ParallelScoringService.MAX_PARSE_RETRIES, results[0].outputTokens)
         coVerify(exactly = ParallelScoringService.MAX_PARSE_RETRIES) {
             llm.chat(any(), any(), any(), any(), any(), any(), any(), any(), any())
         }

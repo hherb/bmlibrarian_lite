@@ -196,6 +196,16 @@ class FactCheckWorkflowFullTextTest {
     }
 
     @Test
+    fun `a citation request that stated no tokens records no usage row`() = runTest {
+        // the stub's citation results carry 0/0: no reply stated any tokens
+        holdPaper(paper().copy(fullTextMarkdown = "The uploaded body.", fullTextSource = Constants.FULLTEXT_SOURCE_UPLOADED, citationsReadFullText = false))
+
+        workflow.retryFullTextRetrieval(WorkflowConfig(autoFetchFullText = false))
+
+        coVerify(exactly = 0) { usageRepository.recordUsage(any(), any(), any(), "citation", any(), any(), any()) }
+    }
+
+    @Test
     fun `a retry that reads no full text keeps the report and says so`() = runTest {
         holdPaper(paper())
 

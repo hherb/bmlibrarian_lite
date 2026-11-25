@@ -28,6 +28,7 @@ import com.bmlibrarian.factchecker.data.remote.europepmc.EuropePMCResultList
 import com.bmlibrarian.factchecker.data.remote.europepmc.EuropePMCSearchResponse
 import com.bmlibrarian.factchecker.data.remote.europepmc.EuropePMCService
 import com.bmlibrarian.factchecker.data.remote.llm.LLMService
+import com.bmlibrarian.factchecker.data.remote.llm.UsageSink
 import com.bmlibrarian.factchecker.data.remote.pubmed.ESearchResponse
 import com.bmlibrarian.factchecker.data.remote.pubmed.ESearchResult
 import com.bmlibrarian.factchecker.data.remote.pubmed.PubMedApi
@@ -421,6 +422,48 @@ class FactCheckWorkflowSearchFailureTest {
     }
 
     @Test
+    fun `each smart-search answer records its own reply's tokens, an unusable one's too`() = runTest {
+        // #818: every answer is a paid call, recorded as its reply states it
+        holdSession(SearchProvider.PUBMED)
+        coEvery { documentRepository.getDocumentCount(SESSION_ID) } returns 0
+        pubMedFailsWith(429)
+        pubMedFinds("1") { it == "aspirin" }
+        pubMedFinds("2") { it.contains("acetylsalicylic") }
+        var attempt = 0
+        coEvery { llmService.generateAlternativeQueries(any(), any(), any(), any(), any(), any(), any(), any(), any()) } answers {
+            attempt++
+            arg<UsageSink>(8)(100 * attempt, attempt)
+            Result.success(if (attempt > Constants.MAX_QUERY_RETRIES) listOf(ALTERNATIVE_QUERY) else emptyList())
+        }
+
+        workflow.resumeSession(SESSION_ID, smartSearchConfig())
+
+        for (n in 1..Constants.MAX_QUERY_RETRIES + 1) {
+            coVerify(exactly = 1) {
+                usageRepository.recordUsage(SESSION_ID, any(), any(), "smart_search_query_generation", 100 * n, n, any())
+            }
+        }
+    }
+
+    @Test
+    fun `alternative queries that could not be read still record what their reply used`() = runTest {
+        holdSession(SearchProvider.PUBMED)
+        stored = stored.copy(workflowStep = WorkflowStep.COMPLETED)
+        coEvery { llmService.generateAlternativeQueries(any(), any(), any(), any(), any(), any(), any(), any(), any()) } answers {
+            arg<UsageSink>(8)(321, 12)
+            Result.failure(IllegalStateException("unreadable"))
+        }
+        coEvery { reportRepository.getReportBySession(SESSION_ID) } returns mockk(relaxed = true)
+        workflow.restoreForViewing(stored)
+
+        workflow.fetchMoreEvidence()
+
+        coVerify(exactly = 1) {
+            usageRepository.recordUsage(SESSION_ID, any(), any(), "smart_search_query_generation", 321, 12, any())
+        }
+    }
+
+    @Test
     fun `answers that never hold a usable query mark smart search as tried, and the user is told`() = runTest {
         holdSession(SearchProvider.PUBMED)
         coEvery { documentRepository.getDocumentCount(SESSION_ID) } returns 0
@@ -543,6 +586,25 @@ class FactCheckWorkflowSearchFailureTest {
     }
 
     @Test
+    fun `a report that could not be written still records what its reply used`() = runTest {
+        holdSession(SearchProvider.PUBMED)
+        coEvery { documentRepository.getDocumentCount(SESSION_ID) } returns 0
+        pubMedFinds("1") { true }
+        val cited = DocumentEntity(sessionId = SESSION_ID, pmid = "1", title = "One", relevanceScore = 5)
+        coEvery { documentRepository.getDocumentsBySessionSync(SESSION_ID) } returns listOf(cited)
+        coEvery { documentRepository.getCitationsBySessionSync(SESSION_ID) } returns
+            listOf(CitationEntity(documentId = cited.id, passage = "Aspirin reduced strokes."))
+        coEvery { llmService.generateReport(any(), any(), any(), any(), any(), any()) } answers {
+            arg<UsageSink>(5)(4321, 87)
+            Result.failure(IllegalStateException("unparsed report"))
+        }
+
+        workflow.resumeSession(SESSION_ID, config(SearchProvider.PUBMED))
+
+        coVerify(exactly = 1) { usageRepository.recordUsage(SESSION_ID, any(), any(), "report", 4321, 87, any()) }
+    }
+
+    @Test
     fun `a session reopened from history shows what its search failed to retrieve`() = runTest {
         holdSession(SearchProvider.PUBMED)
         val recorded = listOf(RetrievalShortfall(SearchProvider.PUBMED, RequestFailure(RequestFailureKind.HTTP_STATUS, 429), 20))
@@ -564,10 +626,15 @@ class FactCheckWorkflowSearchFailureTest {
         val other = stored.copy(id = OTHER_SESSION_ID, workflowStep = WorkflowStep.CONVERTING_QUERY, pubmedQuery = null)
         coEvery { sessionRepository.getSession(OTHER_SESSION_ID) } returns other
         coEvery { documentRepository.getDocumentCount(any()) } returns 0
-        coEvery { llmService.convertToStructuredQuery(any(), any(), any(), any(), any()) } returns Result.success(ALTERNATIVE_QUERY)
+        coEvery { llmService.convertToStructuredQuery(any(), any(), any(), any(), any()) } answers {
+            arg<UsageSink>(4)(11, 22)
+            Result.success(ALTERNATIVE_QUERY)
+        }
         pubMedFailsWith(429)
         workflow.resumeSession(OTHER_SESSION_ID, config(SearchProvider.PUBMED))
         coVerify { pubMedApi.search(any(), term = match { it.contains("acetylsalicylic") }, any(), any(), any(), any(), any(), any()) }
+        // #818: the conversion is recorded as its reply states it
+        coVerify(exactly = 1) { usageRepository.recordUsage(OTHER_SESSION_ID, any(), any(), "query_conversion", 11, 22, any()) }
 
         workflow.resumeSession(SESSION_ID, config(SearchProvider.PUBMED))
 

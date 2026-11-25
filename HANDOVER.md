@@ -155,38 +155,38 @@ a git pin). Snapshot rows keep `run_status`/`run_deciding` set-once.
 ## Recently landed (context)
 
 - **MANTA-4B shadow stage** (`tools/manta_server/README.md`): with a MANTA URL
-  set, every LLM-scored paper is judged in the background (`manta_judgements`,
-  `Document.manta*`). **Benchmark** (PRs #812, #814;
-  `doc/developer/manta_benchmark/README.md`). Design: MANTA-4B 89 %, the Haiku
-  5.5 classifier 84 %, bmlib's rules 39 % (MANTA calibrated, Haiku
+  set (macOS: localhost only), every LLM-scored paper is judged in the
+  background (`manta_judgements`, `Document.manta*`). **Benchmark** (PRs #812,
+  #814; `doc/developer/manta_benchmark/README.md`). Design: MANTA-4B 89 %, the
+  Haiku 5.5 classifier 84 %, bmlib's rules 39 % (MANTA calibrated, Haiku
   overconfident). Relevance: MANTA-4B ranks as well as the Sonnet 5.5 scorer
   (ρ 0.617 / 0.619). Adopting MANTA is the maintainer's call. **Thinking
-  counts against `max_tokens`** (Haiku 5.5 thinks by default, iOS's endpoint
-  too). **Limits, measured on the apps (#813) and the desktop (#821):** 2048 a
-  score/query/classification, 4096 alternative queries (outgrew 1024 even
-  without thinking), HyDE, citations, quality assessment, brief summary, 8192
-  a report; desktop `SHORT_ANSWER_`/`GENERATION_`/`REPORT_MAX_TOKENS`,
-  measured maxima in `tests/test_token_limits.py`. Open: #819. **Android
-  records the replies' own token counts** (#818): every `LLMService` call
-  takes an `onUsage` sink (`TokenTally::add`), told each answered request's
-  tokens, an unparsed reply and a cut answer's retry included; a mock of a
-  task method needs one more `any()` for it.
-- **A cut answer is asked once more with twice the limit** (desktop #825,
-  apps #822): only one that generated its whole limit (short of it, the
-  context ran out), capped at 16384 (the SDK refuses a non-streaming request
-  past ~21k); one attempt, never backed off; a retry that fails keeps the cut
-  answer; the usage is both requests'. Desktop: in `_chat`/`_chat_prose`
-  (`_chat_response_retrying_cut`), never `_chat_response` (the benchmarks
-  keep fixed limits); on Ollama only within a configured `context_window`;
-  every cut goes to SQLite `cut_answers` (`cut_answers.set_recorder`, set by
-  the GUI and MCP server, reset by tests). Apps: `raisedLimit` in each
+  counts against `max_tokens`**. **Limits, measured on the apps (#813) and the
+  desktop (#821):** 2048 a score/query/classification, 4096 alternative
+  queries (outgrew 1024 even without thinking), HyDE, citations, quality
+  assessment, brief summary, 8192 a report; desktop
+  `SHORT_ANSWER_`/`GENERATION_`/`REPORT_MAX_TOKENS`, measured maxima in
+  `tests/test_token_limits.py`. Open: #819. **Android records the replies' own
+  token counts** (#818): every `LLMService` call takes an `onUsage` sink
+  (`TokenTally::add`), told each paid request's tokens: an unparsed reply, a
+  cut answer's retry and an empty or refused reply (`LLMResult.holdsAnswer`
+  false) included; a request stating none records no row.
+- **A cut answer is asked once more with twice the limit** (desktop #825, apps
+  #822): only one that generated its whole limit, capped at 16384 (the SDK
+  refuses a non-streaming request past ~21k); one attempt, never backed off; a
+  retry that fails keeps the cut answer; the usage is both requests'. Desktop:
+  in `_chat`/`_chat_prose` (`_chat_response_retrying_cut`), never
+  `_chat_response` (the benchmarks keep fixed limits; the interrogation
+  agent's query expansion calls it directly); `LLMResponse.max_tokens` None
+  never retries; on Ollama only within a configured `context_window`; every
+  cut goes to SQLite `cut_answers` (`cut_answers.set_recorder`, set by the GUI
+  and MCP server, reset by tests). Apps: `raisedLimit` in each
   `LLMService.chat`, no `room` cap (`num_ctx` is sized per request), the
-  connection test passes `retryingCut: false`, a cut answer still left is
-  only logged. **A cut answer with no text** (thinking took the limit) is
-  asked again too, and still textless it fails naming its limit (#830; iOS
+  connection test passes `retryingCut: false`, a cut answer still left is only
+  logged. **A cut answer with no text** (thinking took the limit) is asked
+  again too, and still textless it fails naming its limit (#830; iOS
   `ReplyMessage`, `LLMError.cutBeforeWriting`; Android's nullable
-  `OpenAIChatMessage.content`). Deferred: #829 (some parsers read a
-  still-cut answer as complete).
+  `OpenAIChatMessage.content`).
 - **Every search query a fact check ran** (apps, PR #810): `SearchQueryLog`,
   Android Room 11 → 12; not yet seen on a device or simulator.
 - **Strict service JSON** (#781, #784): every service's JSON but esearch is
