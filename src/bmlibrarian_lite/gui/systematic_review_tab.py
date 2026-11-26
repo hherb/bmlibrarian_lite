@@ -61,7 +61,7 @@ from ..audit_records import (
     checkpoint_metadata_with_retraction_snapshot,
 )
 from ..config import LiteConfig
-from ..constants import KEPT_THREAD_EXIT_WAIT_MS, SMART_SEARCH_THRESHOLD
+from ..constants import CUT_ANSWER_QUOTE_HEADING, KEPT_THREAD_EXIT_WAIT_MS, SMART_SEARCH_THRESHOLD
 from ..storage import LiteStorage
 from ..data_models import (
     TransparencyAnalysisFailure,
@@ -172,8 +172,7 @@ class WorkflowWorker(QThread):
             the gathered documents are checked, before anything is scored;
             again, over every document, once smart search's are checked
         smart_search_notice: Emitted when too few documents were relevant
-            and no alternative search could run, with why, or when a cut-off
-            answer's queries were searched and it may have held more
+            and no alternative search could run, with why
     """
 
     progress = Signal(str, int, int)  # step, current, total
@@ -183,7 +182,7 @@ class WorkflowWorker(QThread):
     search_incomplete = Signal(str)  # what the search is missing (#247)
     analysis_incomplete = Signal(str)  # what the analysis could not read (#261)
     retraction_screened = Signal(object)  # RetractionScreen
-    smart_search_notice = Signal(str)  # why no alternative search ran, or a cut-off answer's
+    smart_search_notice = Signal(str)  # why no alternative search ran
 
     # Granular signals for audit trail
     query_generated = Signal(str, str)  # (pubmed_query, nl_query)
@@ -826,10 +825,6 @@ class WorkflowWorker(QThread):
                 [*metadata.search_shortfalls, *round_.shortfalls]
             )
             self._report_incomplete_search(metadata)
-        # After the incomplete search's, whose label text replaces what it showed
-        if round_.notice:
-            metadata.smart_search_notice = round_.notice
-            self.smart_search_notice.emit(round_.notice)
         new = list(round_.documents)
         if not new or self._cancelled:
             return [], checkpoint_metadata
@@ -1563,7 +1558,7 @@ class SystematicReviewTab(QWidget):
         self.search_notice_label.setVisible(True)
 
     def _on_smart_search_notice(self, notice: str) -> None:
-        """Say why no alternative search ran, or that a cut-off answer may have held more.
+        """Say why no alternative search ran.
 
         Args:
             notice: Why, as the reader's sentence.
@@ -1620,7 +1615,14 @@ class SystematicReviewTab(QWidget):
         if title:
             first_line = message.partition("\n")[0]
             self.progress_label.setText(f"Error in {step}: {first_line}")
-            QMessageBox.warning(self, title, message)
+            text, heading, quoted = message.partition(CUT_ANSWER_QUOTE_HEADING)
+            if not heading:
+                QMessageBox.warning(self, title, message)
+                return
+            # a still-cut answer's quote can run to tens of thousands of words (#831)
+            box = QMessageBox(QMessageBox.Icon.Warning, title, text.rstrip(), parent=self)
+            box.setDetailedText(heading + quoted)
+            box.exec()
         else:
             self.progress_label.setText(f"Error in {step}: {message}")
 

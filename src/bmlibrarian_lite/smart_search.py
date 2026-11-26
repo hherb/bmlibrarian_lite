@@ -15,9 +15,8 @@ The rules are the apps' (iOS/macOS's ``executeSmartSearch``) and the
   paid call; the apps search a repeat again, the desktop never does. A
   request that failed, an answer the model declined, or an answer cut off at
   its token limit (asked again, it is likely cut off again, each time paid),
-  stops the round; the complete queries a cut-off answer held before the
-  limit (those not already run) are still searched. None of these is a source's failure, so none
-  records a shortfall.
+  stops the round; no query of an answer still cut is searched (#831). None
+  of these is a source's failure, so none records a shortfall.
 - Each query is searched with the configured provider. Once the round ends,
   a query is kept as run unless a source could not answer it and it found
   nothing new: a later round may ask it again. Kept at the end, so a round
@@ -43,7 +42,6 @@ from .analysis_failures import failure_cause_text
 from .constants import SMART_SEARCH_MAX_QUERY_RETRIES
 from .data_models import ShortfallQuery
 from .exceptions import RefusedResponseError, SearchFailedError, TruncatedResponseError
-from .llm.data_types import strip_unclosed_thinking
 from .query_converter import MAX_TOTAL_QUERY_LENGTH, build_query_string
 from .search_failures import combined_shortfalls, retrieval_shortfalls_from_metadata
 from .smart_search_store import RunQuery
@@ -74,10 +72,9 @@ CUT_OFF_ADVICE_TEXT = (
     "A model that writes out its reasoning first can use up that limit; "
     "another Query Conversion model in Settings may help."
 )
-#: The desktop's own: a cut-off answer is likely cut off again, so it is not asked for again
+#: Still cut after any retries with larger limits, no part of the answer is searched (#831)
 ANSWER_CUT_OFF_TEXT = (
-    "The model's answer was cut off at its length limit before it held a "
-    "complete alternative search query not already run, so no alternative "
+    "The model's answer was cut off at its length limit, so no alternative "
     f"search was run. {CUT_OFF_ADVICE_TEXT}"
 )
 #: Put before ANSWER_CUT_OFF_TEXT when an earlier answer held only repeats
@@ -163,16 +160,12 @@ class SmartSearchRound:
         shortfalls: What its queries lost, each marked as an alternative
             search's; empty when the reader asked and nothing new was found.
         stopped: Whether a stop ended it before every query ran.
-        notice: The reader's sentence when the model's answer was cut off,
-            so the complete queries it held may not be all it would have
-            proposed; else None.
     """
 
     documents: tuple[LiteDocument, ...] = ()
     queries: tuple[str, ...] = ()
     shortfalls: tuple[RetrievalShortfall, ...] = ()
     stopped: bool = False
-    notice: str | None = None
 
 
 class SmartSearcher(Protocol):
@@ -243,23 +236,6 @@ def parse_alternative_queries(answer: str) -> list[RunQuery]:
     return _queries_from(_loads(answer))
 
 
-def cut_off_alternative_queries(answer: str) -> list[RunQuery]:
-    """The usable queries an answer cut off at its token limit completed.
-
-    The whole answer is read first, as :func:`parse_alternative_queries`
-    reads it; otherwise each complete value after the answer's first
-    ``[``, in order, up to the one the limit broke off or the array's end.
-
-    Args:
-        answer: What the model wrote before the limit, untrusted.
-
-    Returns:
-        The queries; empty when none was complete and usable.
-    """
-    answer = strip_unclosed_thinking(answer)
-    return parse_alternative_queries(answer) or _queries_from(_complete_items(answer))
-
-
 def _queries_from(data: Any) -> list[RunQuery]:
     """The usable queries in a parsed answer (see :func:`parse_alternative_queries`)."""
     if isinstance(data, dict):
@@ -304,7 +280,7 @@ def generate_alternative_queries(
     prompt: str,
     should_stop: Callable[[], bool],
     run_before: Collection[str] = (),
-) -> tuple[list[RunQuery], str | None]:
+) -> list[RunQuery]:
     """Ask the model for alternative queries, asking again for an answer with none new.
 
     Args:
@@ -314,26 +290,21 @@ def generate_alternative_queries(
         run_before: Query strings already run; never searched again.
 
     Returns:
-        The new queries, empty only when a stop came first; and the reader's
-        sentence when they are the complete queries not already run of an
-        answer cut off at its token limit (#637), else None.
+        The new queries, empty only when a stop came first.
 
     Raises:
         SmartSearchError: The request to the model failed, the model
-            declined, an answer was cut off at its token limit before a
-            usable query not already run, or no answer held one.
+            declined, an answer was still cut off at its token limit after its
+            retries, or no answer held a usable query not already run.
     """
     only_repeats = False
     for _attempt in range(SMART_SEARCH_MAX_QUERY_RETRIES + 1):
         if should_stop():
-            return [], None
+            return []
         try:
             answer = searcher.ask(prompt)
         except TruncatedResponseError as e:
-            logger.warning("%s", e)  # our own text, never the provider's
-            queries = [q for q in cut_off_alternative_queries(e.content) if q.query not in run_before]
-            if queries:
-                return queries, cut_off_queries_notice(len(queries))
+            logger.warning("%s", e)  # our own text and the model's, never the provider's
             text = f"{EARLIER_REPEATS_TEXT} {ANSWER_CUT_OFF_TEXT}" if only_repeats else ANSWER_CUT_OFF_TEXT
             raise SmartSearchError(text) from e
         except RefusedResponseError as e:
@@ -347,30 +318,10 @@ def generate_alternative_queries(
         usable = parse_alternative_queries(answer)
         queries = [q for q in usable if q.query not in run_before]
         if queries:
-            return queries, None
+            return queries
         only_repeats = only_repeats or bool(usable)
         logger.warning("The model's answer held no usable alternative query not already run")
     raise SmartSearchError(ONLY_REPEATS_TEXT if only_repeats else NO_USABLE_QUERY_TEXT)
-
-
-def cut_off_queries_notice(count: int) -> str:
-    """The reader's sentence for a cut-off answer that held complete queries.
-
-    It says nothing of how many were searched: a stop may end the round
-    first, and the report lists those that were.
-
-    Args:
-        count: How many complete queries not already run it held.
-
-    Returns:
-        That the model may have proposed more, and what to do about it.
-    """
-    held = "1 complete alternative search query" if count == 1 else (
-        f"{count} complete alternative search queries")
-    return (
-        f"The model's answer was cut off at its length limit after {held} "
-        f"not already run, so it may have proposed more. {CUT_OFF_ADVICE_TEXT}"
-    )
 
 
 def run_smart_search(
@@ -401,17 +352,15 @@ def run_smart_search(
         What the round found.
 
     Raises:
-        SmartSearchError: No usable query not already run, an answer cut off
-            at its token limit before a complete query not already run, or the
-            model could not be asked.
+        SmartSearchError: No usable query not already run, an answer still
+            cut off at its token limit, or the model could not be asked.
         SearchFailedError: The reader asked, and failures left the round with
-            nothing new, a stop or not (a cancel does not excuse reporting them);
-            its ``notice`` is the round's.
+            nothing new, a stop or not (a cancel does not excuse reporting them).
     """
     tell = progress or (lambda _message: None)
     tried = storage.get_smart_search_queries(context.checkpoint_id)
     tell("Generating alternative search strategies...")
-    alternatives, notice = generate_alternative_queries(
+    alternatives = generate_alternative_queries(
         searcher,
         alternative_queries_prompt(context, [t.label for t in tried]),
         should_stop,
@@ -455,10 +404,10 @@ def run_smart_search(
     shortfalls = combined_shortfalls(lost)
     if asked and not found:
         if shortfalls:
-            raise SearchFailedError(shortfalls, notice)
+            raise SearchFailedError(shortfalls)
         # A request for more evidence that found nothing keeps nothing
         shortfalls = []
-    return SmartSearchRound(tuple(found), tuple(ran), tuple(shortfalls), stopped, notice)
+    return SmartSearchRound(tuple(found), tuple(ran), tuple(shortfalls), stopped)
 
 
 def _strings(value: object) -> list[str]:
@@ -466,24 +415,6 @@ def _strings(value: object) -> list[str]:
     if not isinstance(value, list):
         return []
     return [s.strip() for s in value if isinstance(s, str) and s.strip()]
-
-
-def _complete_items(answer: str) -> list[Any]:
-    """Each complete value in the first JSON array of an answer cut off part-way."""
-    start = answer.find("[")
-    if start < 0:
-        return []
-    decoder = json.JSONDecoder()
-    items: list[Any] = []
-    pos = start + 1
-    while True:
-        while pos < len(answer) and answer[pos] in " \t\r\n,":
-            pos += 1
-        try:
-            item, pos = decoder.raw_decode(answer, pos)
-        except json.JSONDecodeError:
-            return items
-        items.append(item)
 
 
 def _loads(answer: str) -> Any:

@@ -25,7 +25,7 @@ import logging
 import os
 import re
 import time
-from typing import Optional
+from typing import Any, Optional
 
 from .base import (
     BaseProvider,
@@ -36,6 +36,7 @@ from .base import (
 )
 from ...constants import (
     ANTHROPIC_MODELS_PAGE_LIMIT,
+    ANTHROPIC_NONSTREAMING_MAX_TOKENS,
     ANTHROPIC_RETIRED_MODEL_SUCCESSORS,
     anthropic_model_pricing,
 )
@@ -47,7 +48,32 @@ from ..data_types import (
     strip_thinking_tags,
 )
 
+from ...exceptions import OutputLimitExceededError
+
 logger = logging.getLogger(__name__)
+
+#: A 400's message when ``max_tokens`` passes the model's maximum, as the API
+#: words it (2026-11-26): "max_tokens: 10000000 > 128000, which is the maximum
+#: allowed number of output tokens for claude-haiku-5-5"
+_OUTPUT_LIMIT_REFUSAL = re.compile(
+    r"max_tokens: \d+ > (\d+), which is the maximum allowed number of output tokens"
+)
+
+
+def stated_output_maximum(error: Exception) -> int | None:
+    """The model's maximum output a refused request stated, or None.
+
+    Args:
+        error: What the request raised.
+
+    Returns:
+        The maximum, when *error* is a 400 refusing the token limit as too
+        large; None for anything else.
+    """
+    if getattr(error, "status_code", None) != 400:
+        return None
+    match = _OUTPUT_LIMIT_REFUSAL.search(str(error))
+    return int(match.group(1)) if match else None
 
 #: A Messages answer's ``stop_reason`` when the context window ran out mid-answer
 ANTHROPIC_STOP_CONTEXT_EXCEEDED = "model_context_window_exceeded"
@@ -232,15 +258,20 @@ class AnthropicProvider(BaseProvider):
                 Claude Opus 4.7 and later refuse it, so Claude samples at the
                 API's defaults (#758, bmlib#705). Kept for the shared
                 provider signature.
-            max_tokens: Maximum tokens in the response.
+            max_tokens: Maximum tokens in the response. Past
+                ``ANTHROPIC_NONSTREAMING_MAX_TOKENS`` the request streams.
             **kwargs: Additional parameters: ``json_mode``; ``top_p`` is not
                 sent, for the reason ``temperature`` is not.
 
         Returns:
             LLMResponse with Claude's response.
+
+        Raises:
+            OutputLimitExceededError: A 400 stating the model's maximum output,
+                which ``max_tokens`` exceeds (#831).
         """
         model = current_anthropic_model(model or self.default_model)
-        client = self._get_client()
+        client: Any = self._get_client()  # the SDK is imported lazily
 
         json_mode: bool = kwargs.get("json_mode", False)  # type: ignore
 
@@ -263,8 +294,20 @@ class AnthropicProvider(BaseProvider):
         if system_content:
             request_kwargs["system"] = system_content
 
-        # Make API call
-        response = client.messages.create(**request_kwargs)
+        try:
+            if max_tokens > ANTHROPIC_NONSTREAMING_MAX_TOKENS:
+                # The SDK refuses a large limit unless it streams; the final message is the same
+                with client.messages.stream(**request_kwargs) as stream:
+                    response = stream.get_final_message()
+            else:
+                response = client.messages.create(**request_kwargs)
+        except Exception as e:
+            maximum = stated_output_maximum(e)
+            if maximum is None:
+                raise
+            raise OutputLimitExceededError(
+                f"{model} produces at most {maximum} output tokens, not {max_tokens}", maximum
+            ) from e
 
         # Extract content
         content = ""

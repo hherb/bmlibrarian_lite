@@ -2,9 +2,9 @@
 
 The paths whose answer code reads (scoring, citations, the benchmarks) record
 it as its own cause, never asked again with the same limit: it is likely cut
-off again, each time paid (the one retry with a larger limit is
-test_cut_answer_retry.py's, #825). The prose paths (the report, the
-summaries, a document answer) keep what the model wrote and say it stopped.
+off again, each time paid (the retries with larger limits are
+test_cut_answer_retry.py's, #825, #831). The prose paths (the report, the
+summaries, a document answer) fail too, never showing a part (#831).
 """
 
 from types import SimpleNamespace
@@ -14,7 +14,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from bmlibrarian_lite import mcp_server
-from bmlibrarian_lite.agents.base import CUT_OFF_PROSE_NOTE, LiteBaseAgent
+from bmlibrarian_lite.agents.base import LiteBaseAgent
 from bmlibrarian_lite.agents.citation_agent import LiteCitationAgent
 from bmlibrarian_lite.agents.interrogation_agent import LiteInterrogationAgent
 from bmlibrarian_lite.agents.reporting_agent import LiteReportingAgent
@@ -80,7 +80,7 @@ def without_retry_delays(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 class TestTheBaseAgent:
-    """``_chat`` refuses a cut-off answer; ``_chat_prose`` keeps it, marked."""
+    """``_chat`` and ``_chat_prose`` refuse a cut-off answer."""
 
     @pytest.mark.parametrize("stop_reason", ["end_turn", "stop", None])
     def test_a_finished_answer_is_returned_as_written(self, stop_reason: str | None) -> None:
@@ -101,7 +101,7 @@ class TestTheBaseAgent:
             agent._chat(MESSAGES)
 
     def test_chat_keeps_what_a_cut_off_answer_wrote_on_the_error(self) -> None:
-        """A caller that can use its complete parts gets them (#631 item 2)."""
+        """Kept on the error for the log and the reader, never read as the answer (#831)."""
         agent = LiteBaseAgent.__new__(LiteBaseAgent)
         agent._chat_response = answers(cut_off('[{"a": 1}, {"b"'))  # type: ignore[method-assign]
 
@@ -109,8 +109,8 @@ class TestTheBaseAgent:
             agent._chat(MESSAGES)
         assert raised.value.content == '[{"a": 1}, {"b"'
 
-    def test_chat_prose_keeps_what_an_answer_with_no_prose_wrote(self) -> None:
-        """Unclosed reasoning is no prose, but it is what the model wrote."""
+    def test_chat_prose_keeps_unclosed_reasoning_on_the_error(self) -> None:
+        """Reasoning cut before it closed is what the model wrote, kept as written."""
         agent = LiteBaseAgent.__new__(LiteBaseAgent)
         agent._chat_response = answers(cut_off("<think>\nThe user"))  # type: ignore[method-assign]
 
@@ -135,35 +135,14 @@ class TestTheBaseAgent:
         assert cause.value == -15 and not cause.is_retryable
         assert advice_for_causes([cause]) == "Another model may answer what this one declined."
 
-    def test_chat_prose_keeps_a_cut_off_answer_and_says_so(self) -> None:
-        """What the model wrote is kept, and the note follows it."""
-        agent = LiteBaseAgent.__new__(LiteBaseAgent)
-        agent._chat_response = answers(cut_off("Aspirin reduced"))  # type: ignore[method-assign]
-
-        assert agent._chat_prose(MESSAGES) == f"Aspirin reduced\n\n{CUT_OFF_PROSE_NOTE}"
-
-    @pytest.mark.parametrize("content", ["", "  \n", "<think>\nThe user asks about aspirin, so"])
-    def test_a_cut_off_answer_with_no_prose_is_refused(self, content: str) -> None:
-        """Nothing written, or only reasoning never closed, is not a report with a note."""
+    @pytest.mark.parametrize("content", ["Aspirin reduced", "", "<think>\nThe user asks about aspirin, so"])
+    def test_chat_prose_refuses_a_cut_off_answer(self, content: str) -> None:
+        """Part of a report is never shown as the report (#831), whatever it holds."""
         agent = LiteBaseAgent.__new__(LiteBaseAgent)
         agent._chat_response = answers(cut_off(content))  # type: ignore[method-assign]
 
         with pytest.raises(TruncatedResponseError, match="token limit"):
             agent._chat_prose(MESSAGES)
-
-    def test_unclosed_reasoning_after_the_prose_is_dropped(self) -> None:
-        """The provider strips a closed block only; an open one is not the answer."""
-        agent = LiteBaseAgent.__new__(LiteBaseAgent)
-        agent._chat_response = answers(cut_off("Aspirin reduced stroke.\n<thinking>Now the next"))  # type: ignore[method-assign]
-
-        assert agent._chat_prose(MESSAGES) == f"Aspirin reduced stroke.\n\n{CUT_OFF_PROSE_NOTE}"
-
-    def test_a_cut_off_code_block_is_closed_before_the_note(self) -> None:
-        """Otherwise the note and everything after it render as code."""
-        agent = LiteBaseAgent.__new__(LiteBaseAgent)
-        agent._chat_response = answers(cut_off("Doses:\n```\n75 mg"))  # type: ignore[method-assign]
-
-        assert agent._chat_prose(MESSAGES) == f"Doses:\n```\n75 mg\n```\n\n{CUT_OFF_PROSE_NOTE}"
 
     def test_a_cut_off_greeting_still_proves_a_connection(self) -> None:
         """The connection test asks for ten tokens; the limit is expected."""
@@ -265,20 +244,18 @@ class TestTheJsonPaths:
 class TestTheReport:
     """A report cut off mid-sentence is never shown as complete."""
 
-    def test_the_note_follows_the_body_before_the_references(self) -> None:
-        """The reader learns the synthesis stopped before reading its sources."""
+    def test_a_cut_off_report_fails_quoting_what_it_wrote(self) -> None:
+        """No report is written from part of the synthesis (#831)."""
         agent = LiteReportingAgent()
         agent._chat_response = answers(cut_off("Aspirin reduced stroke in"))  # type: ignore[method-assign]
         citation = Citation(document=make_document(), passage="Aspirin reduced stroke.", relevance_score=4)
 
-        report = agent.generate_report(QUESTION, [citation])
-
-        assert report.index("Aspirin reduced stroke in") < report.index(CUT_OFF_PROSE_NOTE)
-        assert report.index(CUT_OFF_PROSE_NOTE) < report.index("## References")
+        with pytest.raises(TruncatedResponseError, match="Aspirin reduced stroke in$"):
+            agent.generate_report(QUESTION, [citation])
 
 
 class TestDocumentInterrogation:
-    """A document answer is prose; its query expansion keeps what it can."""
+    """A cut document answer fails; a cut query expansion adds nothing."""
 
     @staticmethod
     def agent_with(response: LLMResponse) -> LiteInterrogationAgent:
@@ -292,21 +269,18 @@ class TestDocumentInterrogation:
         agent._chat_response = answers(response)  # type: ignore[method-assign]
         return agent
 
-    def test_a_cut_off_answer_is_shown_with_the_note(self) -> None:
-        """Not raised at the reader: what the model wrote is still read."""
+    def test_a_cut_off_answer_fails_quoting_what_it_wrote(self) -> None:
+        """The reader sees the error with the text, never the text as the answer (#831)."""
         agent = self.agent_with(cut_off("Aspirin reduced"))
 
-        answer, _ = agent.ask(QUESTION, use_query_expansion=False)
+        with pytest.raises(TruncatedResponseError, match="The answer as cut:\n\nAspirin reduced$"):
+            agent.ask(QUESTION, use_query_expansion=False)
 
-        assert answer == f"Aspirin reduced\n\n{CUT_OFF_PROSE_NOTE}"
-
-    def test_a_cut_off_expansion_keeps_its_complete_lines(self) -> None:
-        """The last line may stop mid-query; the ones before it are whole."""
+    def test_a_cut_off_expansion_adds_nothing(self) -> None:
+        """Its complete lines are a part of the answer, so none is searched (#831)."""
         agent = self.agent_with(cut_off("Aspirin and stroke risk\nAntiplatelet therapy in stroke\nAcetylsal"))
 
-        assert agent._expand_query(QUESTION) == [
-            QUESTION, "Aspirin and stroke risk", "Antiplatelet therapy in stroke",
-        ]
+        assert agent._expand_query(QUESTION) == [QUESTION]
 
     def test_a_declined_expansion_adds_nothing(self) -> None:
         """What a model wrote before declining is no query (#631 item 3)."""
@@ -322,17 +296,17 @@ class TestDocumentInterrogation:
 
 
 class TestTheReportTab:
-    """The note survives the tab's citation links."""
+    """Text after a link cut off mid-id survives the tab's citation links."""
 
-    def test_a_link_cut_off_mid_id_does_not_swallow_the_note(self) -> None:
+    def test_a_link_cut_off_mid_id_does_not_swallow_what_follows(self) -> None:
         """An unclosed ``(docid:`` once matched up to the first year's ``)``."""
         tab = SimpleNamespace(_citations_by_doc_id={}, _find_document_by_citation=lambda _text: None)
         report = (
-            f"Aspirin lowered risk [Smith et al., 2021](docid:pmid-1234\n\n{CUT_OFF_PROSE_NOTE}"
+            "Aspirin lowered risk [Smith et al., 2021](docid:pmid-1234\n\nThe next paragraph."
             "\n\n## References\n\n1. Smith J (2021). Title."
         )
 
         html = ReportTab._make_citations_clickable(tab, report)  # type: ignore[arg-type]
 
-        assert "stopped at its length limit" in html
+        assert "The next paragraph." in html
         assert "References</h2>" in html

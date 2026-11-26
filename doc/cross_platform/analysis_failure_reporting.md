@@ -858,18 +858,23 @@ once, in this order:
 token limit (Anthropic's `max_tokens` or `model_context_window_exceeded`,
 Ollama's `done_reason` `length`, or an answer of the whole `num_predict` from
 a server that sends no `done_reason`), the
-answer is incomplete, and asked again with the same limit it is likely cut
-off again. So an analysis stage's answer (scoring, citation extraction) is
-recorded as `RESPONSE_TOO_LARGE` and **never retried**, rather than failing to
-parse and being retried as unreadable; the model benchmarks record it the
-same way. The advice names the model, not a token setting: no setting yet
-reaches the limit these stages use (#633). Prose the reader reads as written
-(the report, a summary, a document answer) is kept, followed by a note that
-it stopped at its length limit; reasoning it never closed is dropped, and an
-answer cut off before any prose fails instead. Query expansion keeps the
-complete lines of a cut-off answer. **A declined answer** (Anthropic's
-`refusal`) is `MODEL_REFUSED` (−15), never retried, and never kept as prose:
-what a model wrote before declining is not its answer. Python only so far.
+answer is incomplete. One that generated its whole limit is asked again, up
+to three times, each with twice the last limit, never past the model's own
+maximum (#825, #831; the developer guide has the mechanics). Asked again with
+the *same* limit it is likely cut off again, so an analysis stage's answer
+still cut (scoring, citation extraction) is recorded as `RESPONSE_TOO_LARGE`
+and **never retried** as unreadable; the model benchmarks, which ask once,
+record it the same way. The advice names the model, not a token setting: no
+setting yet reaches the limit these stages use (#633). **No part of an answer
+still cut is used** (#831), prose included: the report, a summary or a
+document answer fails with an error that names the limit and quotes the cut
+answer, and query expansion adds no query. A retry that fails (an outage, a
+timeout) fails as the cut answer before it, naming that failure: a retry is
+one request, never re-sent as transient. Every cut answer is logged with its
+text. Desktop so far; the apps follow (#831, #829). **A declined answer**
+(Anthropic's `refusal`) is `MODEL_REFUSED` (−15), never retried, and never
+kept as prose: what a model wrote before declining is not its answer. Python
+only so far.
 
 **Spent retries are not a cause.** Every provider failure is retried, so each
 one reaches the agent wrapped in a `RetryExhaustedError`. Recording that

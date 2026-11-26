@@ -102,6 +102,24 @@ apps additionally carry their own store version tags (`swift_*`, `appstore_*`).
   model spent the whole limit thinking. Before, the apps failed it at once
   (iOS re-sent it three times at the same limit). If the retry is also cut
   with no text, it now fails with an error that names the limit.
+- **Desktop: a cut answer is asked again up to three times, and one still
+  cut fails (#831).** Each retry doubles the last limit (2×, 4× and 8× the
+  first). There is no fixed cap of 16,384 any more: the model's own maximum
+  applies, as Anthropic's refusal states it. An Anthropic request for more
+  than 8,192 tokens streams. An answer still cut fails, including a report,
+  a document answer or a summary. The error names the limit and quotes the
+  cut answer, which points to the cause (a looping model, a prompt inviting
+  an over-long answer, thinking that never ends). No part of it is used:
+  before, a report was shown with a note saying it was cut, and smart search
+  ran the complete queries of a cut answer. A retry that fails (an outage, a
+  timeout) fails as a cut answer and names that failure; before, the reader
+  was told the answer was cut even after larger limits. The report's error
+  dialog keeps the cut answer under *Show Details*, and a document answer's
+  error gives its advice before the quote. A query expansion that fails for
+  any other reason than a declined or cut answer now fails the question
+  instead of quietly searching the question alone. Every cut answer is
+  logged with its text and recorded in `cut_answers`, one row per try. The
+  apps follow.
 - **Desktop: Claude 5.5's answers are no longer cut off (#821).** Measured
   with the desktop's own prompts on Claude Haiku 5.5 and Sonnet 5.5:
   - Every citation call on a full-text window outgrew its limit of 512, on

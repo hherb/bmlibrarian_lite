@@ -2479,11 +2479,10 @@ class ReportMetadata:
         alternative_queries: The query strings smart search ran for the
             report, in order; empty when it ran none
         smart_search_notice: Why the review's round of alternative queries
-            could not run or broke off, or that a cut-off answer may have
-            proposed more than its queries (#637), as the reader's sentence.
-            A later round that found documents replaces it with its own,
-            None unless that round's answer was cut off. None when nothing
-            needs saying
+            could not run or broke off, as the reader's sentence (a report
+            saved before #831 may say a cut-off answer may have proposed
+            more). A later round that found documents clears it. None when
+            nothing needs saying
         search_shortfalls: What failed sources, batches or pages left out of
             the search (#247); empty when the search was complete
         analysis_shortfalls: What scoring and citation extraction could not

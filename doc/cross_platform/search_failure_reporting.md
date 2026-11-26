@@ -400,11 +400,12 @@ ways:
 - An answer cut off at its token limit (Anthropic's `max_tokens` or
   `model_context_window_exceeded`, Ollama's `done_reason` `length`, or, from
   a server that sends no `done_reason`, an answer of the whole `num_predict`)
-  is not asked for again, since the same limit likely cuts it off again, each
-  time paid. The complete queries it held before the limit (each whole value
-  after its first `[`) are still searched; with none new, the user is told
-  the answer was cut off before it held one not already run, not that it held
-  no usable query, and that an earlier answer held only repeats if one did.
+  and still cut after any retries with larger limits (#825, #831) is not
+  asked for again, since the same limit likely cuts it off again, each time
+  paid. None of its queries is searched, not even the complete ones (#831;
+  before, they were): the user is told the answer was cut off, and that an
+  earlier answer held only repeats if one did. Desktop so far; the apps still
+  search a cut answer's complete queries until they port #831.
 - An answer the model declined (Anthropic's `refusal`) is not asked for again
   either: the user is told the model declined, and that another Query
   Conversion model may answer.

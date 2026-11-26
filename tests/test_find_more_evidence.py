@@ -64,12 +64,12 @@ from bmlibrarian_lite.retraction_text import (
     retraction_methods_line,
 )
 from bmlibrarian_lite.smart_search import (
+    ANSWER_CUT_OFF_TEXT,
     NO_NEW_EVIDENCE_TEXT,
     NO_USABLE_QUERY_TEXT,
     SmartSearchContext,
     SmartSearchError,
     SmartSearchRound,
-    cut_off_queries_notice,
 )
 from bmlibrarian_lite.storage import LiteStorage
 
@@ -329,20 +329,6 @@ class TestAlternativeQueries:
 
         assert run.metadata.smart_search_notice is None
 
-    def test_a_cut_off_rounds_notice_replaces_the_reviews(self, storage: LiteStorage) -> None:
-        """#637 item 2: the report says the model may have proposed more than were searched."""
-        reviewed(storage)
-        notice = cut_off_queries_notice(1)
-        run = Run(storage, rounds=[SmartSearchRound((make_document("5"),), ("(q[tiab])",), notice=notice)])
-        found(storage, "5")
-
-        outcome = run([])
-
-        assert run.metadata.smart_search_notice == notice
-        text = more_evidence_text(outcome)
-        assert text.startswith(f"Ran 1 alternative search. {notice}")
-        assert text.endswith("The report was written again.")
-
     def test_a_run_without_a_round_keeps_the_reviews_notice(self, storage: LiteStorage) -> None:
         """The search's own new documents say nothing of the review's alternative searches."""
         reviewed(storage)
@@ -368,29 +354,6 @@ class TestAlternativeQueries:
         assert outcome.report is None
         run.reporter.generate_report.assert_not_called()
         assert storage.get_checkpoint_for_question(QUESTION).report == "Old report."
-
-    def test_a_cut_off_round_finding_nothing_says_both(self, storage: LiteStorage) -> None:
-        """#637 item 2: that the answer was cut off, then that nothing new was found."""
-        reviewed(storage)
-        notice = cut_off_queries_notice(1)
-        run = Run(storage, rounds=[SmartSearchRound((), ("(q[tiab])",), notice=notice)])
-
-        outcome = run([])
-
-        assert outcome.notice == NO_NEW_EVIDENCE_TEXT
-        assert more_evidence_text(outcome) == f"Ran 1 alternative search. {notice} {NO_NEW_EVIDENCE_TEXT}"
-        assert storage.get_checkpoint_for_question(QUESTION).report == "Old report."
-
-    def test_a_stopped_cut_off_round_is_a_cancel_and_still_says_it(self, storage: LiteStorage) -> None:
-        """The answer was cut off whether or not the reader stopped the round."""
-        reviewed(storage)
-        notice = cut_off_queries_notice(2)
-        run = Run(storage, rounds=[SmartSearchRound((), ("(q[tiab])",), stopped=True, notice=notice)])
-
-        outcome = run([])
-
-        assert outcome.cancelled and outcome.notice is None
-        assert more_evidence_text(outcome) == f"Ran 1 alternative search. {notice} {CANCELLED_UNCHANGED_TEXT}"
 
     def test_what_the_round_lost_is_marked_as_an_alternative_searchs(
         self, storage: LiteStorage
@@ -1141,53 +1104,16 @@ class TestTheReviewsOwnSmartSearch:
         assert (metadata.documents_retrieved, metadata.documents_accepted) == (3, 2)
         assert notices == [] and metadata.smart_search_notice is None
 
-    def test_a_cut_off_answers_queries_run_and_say_so(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """#637 item 2: its complete query is searched, and the reader told it may have held more."""
-        query = '(("Aspirin"[mh])) AND humans[mh] AND hasabstract'
+    def test_a_cut_off_answer_runs_no_query_and_says_so(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """#831: no part of an answer still cut is searched; the reader is told, and the review goes on."""
         _agent, _scorer, finished, notices = review(
-            monkeypatch, {"1": 5, "2": 2, "5": 5},
-            [TruncatedResponseError("limit", content=ALTERNATIVE[:-1] + ", {")],
-            {query: [make_document("5")]},
+            monkeypatch, {"1": 5, "2": 2}, [TruncatedResponseError("limit", content=ALTERNATIVE)],
         )
 
         metadata = finished[0]
-        assert metadata.alternative_queries == [query]
-        assert notices == [cut_off_queries_notice(1)]
-        assert metadata.smart_search_notice == cut_off_queries_notice(1)
-
-    def test_a_cut_off_answers_queries_finding_nothing_still_say_so(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """#637 item 2: the likeliest case, told and kept with the run though nothing new came."""
-        query = '(("Aspirin"[mh])) AND humans[mh] AND hasabstract'
-        stored: list[dict[str, Any]] = []
-        _agent, _scorer, finished, notices = review(
-            monkeypatch, {"1": 5, "2": 2},
-            [TruncatedResponseError("limit", content=ALTERNATIVE[:-1] + ", {")],
-            {query: []}, stored=stored,
-        )
-
-        notice = cut_off_queries_notice(1)
-        assert notices == [notice]
-        assert finished[0].alternative_queries == [query]
-        assert finished[0].smart_search_notice == notice
-        assert any(m.get(CHECKPOINT_REPORT_METADATA_KEY, {}).get("smart_search_notice") == notice
-                   for m in stored)
-
-    def test_a_cut_off_notice_comes_after_what_its_queries_lost(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """The incomplete search's label text replaces what it showed; the notice adds to it."""
-        query = '(("Aspirin"[mh])) AND humans[mh] AND hasabstract'
-        lost = RetrievalShortfall(SearchProvider.EUROPEPMC,
-                                  RequestFailure(RequestFailureKind.TIMEOUT), records_missing=4)
-        told: list[tuple[str, str]] = []
-        review(monkeypatch, {"1": 5, "2": 2},
-               [TruncatedResponseError("limit", content=ALTERNATIVE[:-1] + ", {")],
-               {query: [lost]}, told=told)
-
-        assert [kind for kind, _text in told] == ["incomplete", "notice"]
-        assert told[-1][1] == cut_off_queries_notice(1)
+        assert metadata.alternative_queries == []
+        assert notices == [ANSWER_CUT_OFF_TEXT]
+        assert metadata.smart_search_notice == ANSWER_CUT_OFF_TEXT
 
     def test_enough_relevant_runs_none(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Nothing asked, nothing paid."""
@@ -1402,23 +1328,6 @@ class TestTheWorker:
         ended = self.run_worker(monkeypatch, fail)
         assert list(ended) == ["error"]
         assert "an alternative search of PubMed could not be completed" in ended["error"][0][0]
-
-    def test_a_failed_search_after_a_cut_off_answer_says_both(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """#639: the dialog also tells that the model may have proposed more, and what to do."""
-        lost = RetrievalShortfall(SearchProvider.PUBMED,
-                                  RequestFailure(RequestFailureKind.TIMEOUT),
-                                  query=ShortfallQuery.ALTERNATIVE)
-
-        def fail() -> MoreEvidence:
-            raise SearchFailedError([lost], cut_off_queries_notice(1))
-
-        ended = self.run_worker(monkeypatch, fail)
-        assert list(ended) == ["error"]
-        text = ended["error"][0][0]
-        assert "an alternative search of PubMed could not be completed" in text
-        assert cut_off_queries_notice(1) in text
 
     def test_a_failure_is_told_in_the_readers_words(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Never the provider's."""

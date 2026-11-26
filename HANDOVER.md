@@ -171,21 +171,21 @@ a git pin). Snapshot rows keep `run_status`/`run_deciding` set-once.
   (`TokenTally::add`), told each paid request's tokens: an unparsed reply, a
   cut answer's retry and an empty or refused reply (`LLMResult.holdsAnswer`
   false) included; a request stating none records no row.
-- **A cut answer is asked once more with twice the limit** (desktop #825, apps
-  #822): only one that generated its whole limit, capped at 16384 (the SDK
-  refuses a non-streaming request past ~21k); one attempt, never backed off; a
-  retry that fails keeps the cut answer; the usage is both requests'. Desktop:
-  in `_chat`/`_chat_prose` (`_chat_response_retrying_cut`), never
-  `_chat_response` (the benchmarks keep fixed limits; the interrogation
-  agent's query expansion calls it directly); the question's own query asks
-  through `LiteSearchAgent.convert_ask` (#827), so a still-cut one takes the
-  fallback query; `LLMResponse.max_tokens` None never retries; on Ollama
-  only within a configured `context_window`; every cut goes to SQLite
-  `cut_answers` (`cut_answers.set_recorder`, set by the GUI and MCP server,
-  reset by tests). Apps: `raisedLimit` in each
-  `LLMService.chat`, no `room` cap (`num_ctx` is sized per request), the
-  connection test passes `retryingCut: false`, a cut answer still left is only
-  logged. **A cut answer with no text** (thinking took the limit) is asked
+- **A cut answer is asked again with a larger limit** (desktop #825/#831,
+  apps #822): only one that generated its whole limit; each retry one attempt,
+  never backed off; usage is every request's. **Desktop (#831, PR #838):**
+  three retries (2×, 4×, 8×), capped
+  only by the model: Anthropic's 400 `max_tokens: N > M, which is the maximum
+  allowed…` (probed 2026-11-26: 128000 on Haiku/Sonnet 5.5) is
+  `OutputLimitExceededError`, then asked within M; past 8192 it streams; Ollama
+  only within a configured `context_window`. **Still cut, every caller fails**,
+  prose and smart search too (the error quotes the text); each cut is logged
+  with its text, one `cut_answers` row per try (`attempt`). Never through
+  `_chat_response` (the benchmarks keep fixed limits); the query converter
+  takes its fallback (#827). Apps (one retry, capped at 16384): `raisedLimit`
+  in each `LLMService.chat`, no `room` cap (`num_ctx` is sized per request),
+  the connection test passes `retryingCut: false`, a cut answer still left is
+  only logged. **A cut answer with no text** (thinking took the limit) is asked
   again too, and still textless it fails naming its limit (#830; iOS
   `ReplyMessage`, `LLMError.cutBeforeWriting`; Android's nullable
   `OpenAIChatMessage.content`). **A refusal** (`refusal`/`content_filter`)
@@ -208,7 +208,7 @@ a git pin). Snapshot rows keep `run_status`/`run_deciding` set-once.
   the CloudKit schema deployed to Production (`RetractionCheckRecord`, new
   `Document` fields), App Privacy answers per `PRIVACY.md`. **Never pass an
   `@Observable` property `inout`** (#697; pass a `ReferenceWritableKeyPath`).
-- **Cut-off, refused, unknown-stop answers** (#629, #631, #637; PRs #630, #632, #636, #638): `TruncatedResponseError` (`.content` kept; smart search searches its complete queries, `smart_search_notice`), `RefusedResponseError` (never retried); an unknown stop reason is read as finished unless the whole token limit was generated. **A test stubbing the reporting or interrogation answer patches `_chat_prose`.**
+- **Cut-off, refused, unknown-stop answers** (#629, #631, #637; PRs #630, #632, #636, #638): `TruncatedResponseError` (`.content` kept, never read as the answer since #831), `RefusedResponseError` (never retried); an unknown stop reason is read as finished unless the whole token limit was generated. **A test stubbing the reporting or interrogation answer patches `_chat_prose`.**
 - **Desktop: Find More Evidence** (PR #628) scores **into the reviewed run's
   checkpoint**; **Retry Full Text** (PR #622) replaces citations only when the
   text yields passages (`citation_reads`). **Every LLM text path map-reduces
@@ -279,9 +279,11 @@ Open issues by family; each issue carries the detail. None blocks another.
   stage (spec §5) gets its own spec revision after that report. The shadow
   stage's parked follow-ups (untested paths, an unbounded queue, the wire
   contract fixture): **#815**.
-- **#831** (decided 2026-11-25, all three): up to three cut-answer retries,
-  the limit doubled up to the model's capacity, a still-cut answer failing
-  with its text (settles **#829**). **#823** a refused desktop quality
+- **#831, the apps' half** (iOS/macOS + Android together, the desktop's PR the
+  reference; contracts in `doc/cross_platform/analysis_failure_reporting.md`,
+  `search_failure_reporting.md`): probe each provider's limit refusal first;
+  scale timeouts or stream; fail every still-cut caller with its text (settles
+  **#829**); smart search stops searching a cut answer's queries. **#823** a refused desktop quality
   assessment reads as unclassified (maintainer's call). **#834** the apps'
   unrecorded paid requests. **#835** a flaky Android wall-clock test.
 - **From the bmlib syncs.** PR #757's issues are fixed and unreleased (a

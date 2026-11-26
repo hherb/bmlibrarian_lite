@@ -317,17 +317,27 @@ output-token limits and token-usage accounting remain unchanged. No character
 count is used to guess a token limit or to claim that the server read a prompt
 in full.
 
-An agent's answer that generates its whole output limit is asked once more with
-twice the limit (#825), through `LiteBaseAgent._chat_response_retrying_cut`
-(`_chat` and `_chat_prose` use it). The retry is capped at
-`CUT_ANSWER_RETRY_MAX_TOKENS`. On Ollama it must also fit the configured
-`context_window` beside the prompt; with none configured there is no retry. An
-answer that stopped short of its limit ran out of context window and is not
-asked again. A retry that raises keeps the cut answer. Every cut goes to the
-SQLite `cut_answers` table through the recorder that
-`cut_answers.set_recorder` sets (the GUI and MCP server set it), so real use
-re-measures the limits. The benchmarks call the client directly and keep fixed
-limits.
+An agent's answer that generates its whole output limit is asked again, up to
+`CUT_ANSWER_MAX_RETRIES` (three) times, each with twice the last limit (#825,
+#831), through `LiteBaseAgent._chat_response_retrying_cut` (`_chat` and
+`_chat_prose` use it). Each retry is one request, never backed off. No fixed
+cap applies; the model's own maximum does. An Anthropic request past
+`ANTHROPIC_NONSTREAMING_MAX_TOKENS` streams (the SDK refuses a non-streaming
+one past about 21,000 tokens, Opus 4 and 4.1 past 8192), and a limit past the
+model's maximum is refused with a 400 stating it, which the provider raises as
+`OutputLimitExceededError`. The agent then asks once more within that maximum.
+On Ollama a retry must fit the configured `context_window` beside the prompt;
+with none configured there is no retry. An answer that stopped short of its
+limit ran out of context window and is not asked again. A retry that raises (a
+timeout, an outage) fails as a cut answer, naming that failure, so no caller
+re-sends it as transient. An answer still cut fails, prose included:
+`TruncatedResponseError` names the limit and quotes the answer, and no part of
+it is read as the answer (smart search runs none of its queries, the query
+expansion adds none). Every cut answer is logged with its text and goes to the
+SQLite `cut_answers` table, one row per try (`attempt`), through the recorder
+that `cut_answers.set_recorder` sets (the GUI and MCP server set it), so real
+use re-measures the limits. The benchmarks call the client directly and keep
+fixed limits.
 
 #### Agent System (`agents/`)
 
@@ -357,10 +367,11 @@ class CustomAgent(LiteBaseAgent):
 ```
 
 `_chat` raises `TruncatedResponseError` when the answer reaches its token
-limit: use it for answers code parses. Text the reader reads as written goes
-through `_chat_prose`, which keeps a cut-off answer and notes that it stopped.
-Both raise `RefusedResponseError` when the model declines (`MODEL_REFUSED`,
-never retried); a declined answer is never kept as prose.
+limit, after its retries: use it for answers code parses. Text the reader
+reads as written goes through `_chat_prose`, which raises it too (#831): a cut
+answer is never shown as prose. Both raise `RefusedResponseError` when the
+model declines (`MODEL_REFUSED`, never retried); a declined answer is never
+kept as prose.
 
 Available agents:
 Each agent sets `TASK_ID` (for example `"document_scoring"`), which selects

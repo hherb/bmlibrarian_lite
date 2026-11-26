@@ -290,8 +290,8 @@ class LiteStorage:
                 conn.executescript(smart_search_store.SCHEMA)
                 # What the MANTA shadow stage found per paper
                 conn.executescript(manta_store.SCHEMA)
-                # The answers cut at their token limit, and their retries (#825)
-                conn.executescript(cut_answers_store.SCHEMA)
+                # The answers cut at their token limit, and their retries (#825, #831)
+                cut_answers_store.create(conn)
                 # Create sqlite-vec virtual tables for document and chunk embeddings
                 conn.execute(
                     f"""
