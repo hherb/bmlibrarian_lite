@@ -151,13 +151,16 @@ QUERY_CONVERSION_TEMPERATURE = 0.1
 GENERATION_MAX_TOKENS = 4096
 # A report (2,675 from six papers' citations; a review cites more).
 REPORT_MAX_TOKENS = 8192
-# An answer that used its whole limit is asked once more with this many times
-# the limit (#825): how long a thinking model thinks varies between runs.
+# An answer that used its whole limit is asked again with this many times the
+# limit, each retry the last one's (#825, #831): how long a thinking model
+# thinks varies between runs. The model's own maximum caps it.
 CUT_ANSWER_RETRY_FACTOR = 2
-# The retry's limit never passes this: past about 21,000 tokens the Anthropic
-# SDK refuses a request that does not stream. Opus 4 and 4.1 it refuses past
-# 8192; that retry raises at once and the cut answer is kept (#825).
-CUT_ANSWER_RETRY_MAX_TOKENS = 16384
+# At most this many retries of a cut answer (#831): a model stuck repeating
+# itself costs no more than 2x, 4x and 8x the limit.
+CUT_ANSWER_MAX_RETRIES = 3
+# An Anthropic request for more output than this streams: the SDK refuses a
+# non-streaming one past about 21,000 tokens, Opus 4 and 4.1 past 8192.
+ANTHROPIC_NONSTREAMING_MAX_TOKENS = 8192
 
 # Default Ollama host URL
 DEFAULT_OLLAMA_HOST = "http://localhost:11434"

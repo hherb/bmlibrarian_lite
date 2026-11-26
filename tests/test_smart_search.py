@@ -58,7 +58,6 @@ from bmlibrarian_lite.search_failures import (
 from bmlibrarian_lite.smart_search import (
     ANSWER_CUT_OFF_TEXT,
     ANSWER_REFUSED_TEXT,
-    CUT_OFF_ADVICE_TEXT,
     EARLIER_REPEATS_TEXT,
     NO_USABLE_QUERY_TEXT,
     ONLY_REPEATS_TEXT,
@@ -66,7 +65,6 @@ from bmlibrarian_lite.smart_search import (
     SmartSearchContext,
     SmartSearchError,
     alternative_queries_prompt,
-    cut_off_queries_notice,
     generate_alternative_queries,
     parse_alternative_queries,
     run_smart_search,
@@ -263,11 +261,9 @@ class TestAskingForThem:
         """A repeat is no query: asked again, and a new one is taken."""
         searcher = Searcher([answer([("x", ["x"])]), answer([("x", ["x"])], [("y", ["y"])])])
 
-        queries, notice = generate_alternative_queries(
-            searcher, "p", lambda: False, {query_of(("x", ["x"]))})
+        queries = generate_alternative_queries(searcher, "p", lambda: False, {query_of(("x", ["x"]))})
 
         assert [q.label for q in queries] == ["y"]
-        assert notice is None
         assert len(searcher.prompts) == 2
 
     def test_only_repeats_are_said_to_be_repeats(self) -> None:
@@ -282,7 +278,7 @@ class TestAskingForThem:
         """The first one usable."""
         searcher = Searcher(["no", answer([("x", ["x"])])])
 
-        assert [q.label for q in generate_alternative_queries(searcher, "p", lambda: False)[0]] == ["x"]
+        assert [q.label for q in generate_alternative_queries(searcher, "p", lambda: False)] == ["x"]
         assert len(searcher.prompts) == 2
 
     def test_a_failed_request_says_why_and_what_to_do(self) -> None:
@@ -297,7 +293,7 @@ class TestAskingForThem:
         assert "sk-secret" not in text
 
     def test_a_cut_off_answer_is_not_asked_for_again(self) -> None:
-        """Asked again with the same limit it is cut off again: one paid call, and says so."""
+        """Still cut after its retries with larger limits: one more call gains nothing, and says so."""
         searcher = Searcher([TruncatedResponseError("limit"), answer([("x", ["x"])])])
 
         with pytest.raises(SmartSearchError) as raised:
@@ -305,57 +301,17 @@ class TestAskingForThem:
         assert str(raised.value) == ANSWER_CUT_OFF_TEXT
         assert len(searcher.prompts) == 1
 
-    def test_a_cut_off_answers_complete_queries_are_searched(self) -> None:
-        """#631 item 2: the queries finished before the limit are used, the broken one never."""
-        whole = answer([("x", ["x"])], [("y", ["y"])])
-        searcher = Searcher([TruncatedResponseError("limit", content=whole[:-1] + ', {"concepts": [{"na')])
-
-        queries, notice = generate_alternative_queries(searcher, "p", lambda: False, {query_of(("x", ["x"]))})
-        assert [q.label for q in queries] == ["y"]
-        assert notice == cut_off_queries_notice(1)
-        assert len(searcher.prompts) == 1
-
     @pytest.mark.parametrize("content", [
-        json.dumps(json.loads(answer([("x", ["x"])]))[0]),
-        f"```json\n{answer([('x', ['x'])])}\n```",
-        '{"queries": ' + answer([("x", ["x"])])[:-1] + ', {"conc',
-    ], ids=["single-object", "fenced", "cut-off-wrapper"])
-    def test_a_cut_off_answer_read_whole_or_wrapped_is_searched(self, content: str) -> None:
-        """An answer that completed at the limit is read as a whole one; a wrapper's array as its own."""
-        searcher = Searcher([TruncatedResponseError("limit", content=content)])
-
-        assert [q.label for q in generate_alternative_queries(searcher, "p", lambda: False)[0]] == ["x"]
-
-    @pytest.mark.parametrize("content", [
-        "", '[{"concepts": [{"name": "x", "keywords": ["x','{"concepts": [{"name": "x", "keywords": ["x"]}, {"na',
+        "", answer([("x", ["x"])]), answer([("x", ["x"])])[:-1] + ', {"conc',
         '<think>[{"concepts": [{"name": "x", "keywords": ["x"]}]}, ',
-    ])
-    def test_a_cut_off_answer_with_no_complete_query_is_not_searched(self, content: str) -> None:
-        """Half a query, a concept outside its query, or reasoning never closed is no query."""
+    ], ids=["empty", "whole", "complete-queries", "reasoning"])
+    def test_no_part_of_a_cut_off_answer_is_searched(self, content: str) -> None:
+        """Not even its complete queries, nor one that parses whole (#831)."""
         searcher = Searcher([TruncatedResponseError("limit", content=content)])
 
         with pytest.raises(SmartSearchError) as raised:
             generate_alternative_queries(searcher, "p", lambda: False)
         assert str(raised.value) == ANSWER_CUT_OFF_TEXT
-
-    def test_a_cut_off_answer_of_repeats_says_it_held_none_not_run(self) -> None:
-        """Its complete queries were all run already: cut off before one that was not."""
-        searcher = Searcher([TruncatedResponseError("limit", content=answer([("x", ["x"])])[:-1] + ", {")])
-
-        with pytest.raises(SmartSearchError) as raised:
-            generate_alternative_queries(searcher, "p", lambda: False, {query_of(("x", ["x"]))})
-        assert str(raised.value) == ANSWER_CUT_OFF_TEXT
-
-    def test_a_cut_off_answer_after_repeats_is_still_searched(self) -> None:
-        """An earlier answer of repeats does not lose the next one's complete queries."""
-        searcher = Searcher([
-            answer([("x", ["x"])]),
-            TruncatedResponseError("limit", content=answer([("y", ["y"])])[:-1] + ", {"),
-        ])
-
-        queries, notice = generate_alternative_queries(searcher, "p", lambda: False, {query_of(("x", ["x"]))})
-        assert [q.label for q in queries] == ["y"]
-        assert notice == cut_off_queries_notice(1)
 
     def test_a_cut_off_answer_after_repeats_says_both(self) -> None:
         """#631 item 5: the earlier answer's repeats are not left out."""
@@ -377,19 +333,7 @@ class TestAskingForThem:
     def test_a_stop_asks_nothing(self) -> None:
         """Not even once."""
         searcher = Searcher([])
-        assert generate_alternative_queries(searcher, "p", lambda: True) == ([], None)
-
-    @pytest.mark.parametrize(("count", "held"), [
-        (1, "after 1 complete alternative search query not"),
-        (2, "after 2 complete alternative search queries not"),
-    ])
-    def test_a_cut_off_answers_notice_counts_its_queries(self, count: int, held: str) -> None:
-        """#637 item 2: the reader is told the model may have proposed more, and what to do."""
-        notice = cut_off_queries_notice(count)
-
-        assert held in notice
-        assert notice.endswith(CUT_OFF_ADVICE_TEXT)
-
+        assert generate_alternative_queries(searcher, "p", lambda: True) == []
 
 A = [("drug A", ["drug A"])]
 B = [("drug B", ["drug B"])]
@@ -420,18 +364,6 @@ class TestARound:
         assert round_.shortfalls == ()
         assert storage.get_smart_search_queries(RUN) == [
             RunQuery("drug A", qa), RunQuery("drug B", qb)]
-
-    def test_a_cut_off_answers_queries_carry_its_notice(self, storage: LiteStorage) -> None:
-        """#637 item 2: the round's queries ran, and the reader learns more may have been proposed."""
-        qa = query_of(*A)
-        searcher = Searcher([TruncatedResponseError("limit", content=answer(A)[:-1] + ", {")],
-                            {qa: [document("1")]})
-
-        round_ = run(searcher, storage)
-
-        assert round_.queries == (qa,)
-        assert round_.notice == cut_off_queries_notice(1)
-        assert run(Searcher([answer(B)]), storage).notice is None
 
     def test_the_next_round_is_told_of_them_and_never_repeats_one(
         self, storage: LiteStorage
@@ -501,18 +433,6 @@ class TestARound:
         with pytest.raises(SearchFailedError) as raised:
             run(searcher, storage)
         assert raised.value.shortfalls[0].query is ShortfallQuery.ALTERNATIVE
-        assert raised.value.notice is None
-
-    def test_a_cut_off_answers_failed_queries_keep_its_notice(self, storage: LiteStorage) -> None:
-        """#639: the failure is told, and so is the cut-off answer behind it."""
-        qa = query_of(*A)
-        lost = RetrievalShortfall(SearchProvider.EUROPEPMC, TIMEOUT, records_missing=4)
-        searcher = Searcher([TruncatedResponseError("limit", content=answer(A)[:-1] + ", {")],
-                            {qa: SearchFailedError([lost])})
-
-        with pytest.raises(SearchFailedError) as raised:
-            run(searcher, storage)
-        assert raised.value.notice == cut_off_queries_notice(1)
 
     def test_on_its_own_the_review_keeps_what_the_queries_lost(
         self, storage: LiteStorage
@@ -661,10 +581,10 @@ class TestTheReportSaysWhichQueriesRan:
         assert "- **Alternative Queries (smart search):**\n  - `(a[tiab])`" in section
         assert "Alternative Queries" not in agent.format_methodology_section(ReportMetadata())
 
-    def test_a_cut_off_answers_notice_heads_its_queries(self) -> None:
-        """#637: one heading, the notice on it and the queries run under it."""
+    def test_a_notice_heads_its_queries(self) -> None:
+        """#637: one heading, the notice on it and the queries run under it (a report saved before #831)."""
         agent = LiteReportingAgent.__new__(LiteReportingAgent)
-        notice = cut_off_queries_notice(1)
+        notice = "The model's answer was cut off at its length limit after 1 complete query."
         section = agent.format_methodology_section(ReportMetadata(
             pubmed_query="p", alternative_queries=["(a[tiab])"], smart_search_notice=notice))
 

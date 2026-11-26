@@ -1,9 +1,11 @@
-"""An answer cut at its token limit is asked once more with twice the limit (#825).
+"""An answer cut at its token limit is asked again, up to three times, each with twice the limit (#825, #831).
 
 Only an answer that generated its whole limit: one that stopped short ran out
-of context window, which a larger limit does not change. Every cut is recorded
-with its task, model, tokens and limits, so real use re-measures the limits.
-The benchmarks keep fixed limits: they call the client directly.
+of context window, which a larger limit does not change. The model's own
+maximum, as a provider's refusal states it, caps the limit. Every cut answer
+is recorded with its task, model, tokens, limits and attempt, so real use
+re-measures the limits. One still cut fails, quoting what it wrote. The
+benchmarks keep fixed limits: they call the client directly.
 """
 
 import sqlite3
@@ -13,13 +15,13 @@ from unittest.mock import MagicMock
 import pytest
 
 from bmlibrarian_lite import cut_answers
-from bmlibrarian_lite.agents.base import CUT_OFF_PROSE_NOTE, LiteBaseAgent
+from bmlibrarian_lite.agents.base import LiteBaseAgent
 from bmlibrarian_lite.agents.search_agent import LiteSearchAgent
 from bmlibrarian_lite.config import LiteConfig
-from bmlibrarian_lite.constants import CUT_ANSWER_RETRY_MAX_TOKENS, SHORT_ANSWER_MAX_TOKENS
+from bmlibrarian_lite.constants import SHORT_ANSWER_MAX_TOKENS
 from bmlibrarian_lite.cut_answers import CutAnswer, raised_limit
 from bmlibrarian_lite.data_models import EvaluationErrorCode
-from bmlibrarian_lite.exceptions import TruncatedResponseError
+from bmlibrarian_lite.exceptions import OutputLimitExceededError, TruncatedResponseError
 from bmlibrarian_lite.llm import LLMMessage, LLMResponse
 from bmlibrarian_lite.llm.data_types import STOP_REASON_MAX_TOKENS, STOP_REASON_REFUSAL
 from bmlibrarian_lite.storage import LiteStorage
@@ -82,26 +84,24 @@ def recorded() -> list[CutAnswer]:
 
 
 class TestTheRaisedLimit:
-    """Twice the limit, never past the cap or the context window's room."""
+    """Twice the limit, three times at most, never past the room the model has."""
 
     def test_a_cut_answer_is_asked_again_with_twice_its_limit(self) -> None:
-        """The whole limit generated: twice it."""
+        """The whole limit generated: twice it, with no fixed cap (#831)."""
         assert raised_limit(2048, 2048, None) == 4096
+        assert raised_limit(32768, 32768, None, attempt=2) == 65536
 
-    def test_the_raised_limit_stops_at_the_cap(self) -> None:
-        """Never past the SDK's non-streaming bound."""
-        assert raised_limit(12000, 12000, None) == CUT_ANSWER_RETRY_MAX_TOKENS
-
-    def test_an_answer_at_the_cap_is_not_asked_again(self) -> None:
-        """No larger limit is allowed, so no retry."""
-        assert raised_limit(CUT_ANSWER_RETRY_MAX_TOKENS, CUT_ANSWER_RETRY_MAX_TOKENS, None) is None
+    def test_three_retries_at_most(self) -> None:
+        """A model stuck repeating itself costs 2x, 4x and 8x the limit, no more."""
+        assert raised_limit(8192, 8192, None, attempt=2) == 16384
+        assert raised_limit(16384, 16384, None, attempt=3) is None
 
     def test_an_answer_short_of_its_limit_ran_out_of_context(self) -> None:
         """Anthropic's context-exceeded stop and Ollama's ``length`` read as the limit too."""
         assert raised_limit(2047, 2048, None) is None
 
-    def test_the_raised_limit_stops_at_the_windows_room(self) -> None:
-        """The prompt keeps its place in the window."""
+    def test_the_raised_limit_stops_at_the_room(self) -> None:
+        """The window's room beside the prompt, or the model's stated maximum."""
         assert raised_limit(2048, 2048, 3000) == 3000
 
     def test_no_room_past_the_limit_is_no_retry(self) -> None:
@@ -110,8 +110,13 @@ class TestTheRaisedLimit:
         assert raised_limit(2048, 2048, 0) is None
 
 
-class TestTheAgentAsksOnceMore:
-    """``_chat`` and ``_chat_prose`` ask a cut answer again with the raised limit."""
+def refused(maximum: int) -> OutputLimitExceededError:
+    """What the provider raises for a limit past the model's *maximum*."""
+    return OutputLimitExceededError(f"produces at most {maximum}", maximum)
+
+
+class TestTheAgentAsksAgain:
+    """``_chat`` and ``_chat_prose`` ask a cut answer again with the raised limits."""
 
     @pytest.mark.parametrize("method", ["_chat", "_chat_prose"])
     def test_cut_then_retried_and_finished(self, method: str, recorded: list[CutAnswer]) -> None:
@@ -120,40 +125,69 @@ class TestTheAgentAsksOnceMore:
 
         assert getattr(agent_on(client), method)(MESSAGES) == '{"score": 4}'
         assert client.limits == [LIMIT, 2 * LIMIT]
-        assert [(r.task_id, r.model, r.max_tokens, r.output_tokens) for r in recorded] == [
-            ("default", "anthropic:test-model", LIMIT, LIMIT)
+        assert [(r.task_id, r.model, r.max_tokens, r.output_tokens, r.attempt) for r in recorded] == [
+            ("default", "anthropic:test-model", LIMIT, LIMIT, 0)
         ]
         assert (recorded[0].retry_max_tokens, recorded[0].retry_output_tokens, recorded[0].retry_cut) == (
             2 * LIMIT, 3000, False
         )
 
-    def test_cut_and_cut_again_is_truncated(self, recorded: list[CutAnswer]) -> None:
-        """Asked only once more: the retry's cut answer is refused as before, with its text."""
-        client = Client(cut('{"a', LIMIT, LIMIT), cut('{"ab', 2 * LIMIT, 2 * LIMIT))
+    def test_each_retry_doubles_the_last_limit(self, recorded: list[CutAnswer]) -> None:
+        """Cut twice, finished on the third request: every cut answer has its row."""
+        client = Client(cut("a", LIMIT, LIMIT), cut("ab", 2 * LIMIT, 2 * LIMIT), finished("abc", 4 * LIMIT))
+
+        assert agent_on(client)._chat(MESSAGES) == "abc"
+        assert client.limits == [LIMIT, 2 * LIMIT, 4 * LIMIT]
+        assert [(r.attempt, r.max_tokens, r.retry_max_tokens, r.retry_cut) for r in recorded] == [
+            (0, LIMIT, 2 * LIMIT, True), (1, 2 * LIMIT, 4 * LIMIT, False),
+        ]
+
+    @pytest.mark.parametrize("method", ["_chat", "_chat_prose"])
+    def test_still_cut_after_three_retries_fails_quoting_the_answer(
+        self, method: str, recorded: list[CutAnswer], caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """No part is read as the answer, prose included: the error names the limit and quotes the text."""
+        limits = [LIMIT, 2 * LIMIT, 4 * LIMIT, 8 * LIMIT]
+        client = Client(*(cut(f"loop {n}", n, n) for n in limits))
 
         with pytest.raises(TruncatedResponseError) as raised:
+            getattr(agent_on(client), method)(MESSAGES)
+        assert client.limits == limits
+        assert raised.value.content == f"loop {8 * LIMIT}"
+        assert f"token limit ({8 * LIMIT} tokens)" in str(raised.value)
+        assert str(raised.value).endswith(f"The answer as cut:\n\nloop {8 * LIMIT}")
+        assert [(r.attempt, r.retry_max_tokens) for r in recorded] == [
+            (0, 2 * LIMIT), (1, 4 * LIMIT), (2, 8 * LIMIT), (3, None),
+        ]
+        assert all(f"loop {n}" in caplog.text for n in limits), "every cut answer is logged with its text"
+
+    def test_a_refused_limit_is_asked_again_at_the_stated_maximum(self, recorded: list[CutAnswer]) -> None:
+        """The refused request is no attempt; the maximum caps that retry and every later one."""
+        client = Client(cut("a", LIMIT, LIMIT), refused(3000), cut("ab", 3000, 3000))
+
+        with pytest.raises(TruncatedResponseError):
             agent_on(client)._chat(MESSAGES)
-        assert raised.value.content == '{"ab'
+        assert client.limits == [LIMIT, 2 * LIMIT, 3000]
+        assert [(r.attempt, r.max_tokens, r.retry_max_tokens, r.retry_cut) for r in recorded] == [
+            (0, LIMIT, 3000, True), (1, 3000, None, None),
+        ]
+
+    def test_a_refusal_at_or_under_the_limit_keeps_the_cut_answer(self, recorded: list[CutAnswer]) -> None:
+        """A maximum no larger than the cut answer's limit gains nothing: asked no more."""
+        client = Client(cut("a", LIMIT, LIMIT), refused(LIMIT))
+
+        with pytest.raises(TruncatedResponseError):
+            agent_on(client)._chat(MESSAGES)
         assert client.limits == [LIMIT, 2 * LIMIT]
-        assert (recorded[0].retry_output_tokens, recorded[0].retry_cut) == (2 * LIMIT, True)
-
-    def test_prose_cut_again_keeps_the_retrys_text_with_the_note(self, recorded: list[CutAnswer]) -> None:
-        """The retry's longer text is shown, marked as cut."""
-        client = Client(cut("Short", LIMIT, LIMIT), cut("Longer", 2 * LIMIT, 2 * LIMIT))
-
-        assert agent_on(client)._chat_prose(MESSAGES) == f"Longer\n\n{CUT_OFF_PROSE_NOTE}"
-        assert recorded[0].retry_cut is True
+        assert [(r.retry_max_tokens, r.retry_output_tokens) for r in recorded] == [(None, None)]
 
     @pytest.mark.parametrize("method", ["_chat", "_chat_prose"])
     def test_context_exceeded_is_not_asked_again(self, method: str, recorded: list[CutAnswer]) -> None:
         """Short of its limit, the window ran out: a larger limit gains nothing. Still recorded."""
         client = Client(cut("Some text", 900, LIMIT))
 
-        if method == "_chat":
-            with pytest.raises(TruncatedResponseError):
-                agent_on(client)._chat(MESSAGES)
-        else:
-            assert agent_on(client)._chat_prose(MESSAGES).endswith(CUT_OFF_PROSE_NOTE)
+        with pytest.raises(TruncatedResponseError):
+            getattr(agent_on(client), method)(MESSAGES)
         assert client.limits == [LIMIT]
         assert [(r.output_tokens, r.retry_max_tokens) for r in recorded] == [(900, None)]
 
@@ -174,25 +208,28 @@ class TestTheAgentAsksOnceMore:
         assert client.limits == [LIMIT]
         assert recorded == []
 
-    def test_a_failed_retry_keeps_the_cut_answer(
-        self, recorded: list[CutAnswer], caplog: pytest.LogCaptureFixture
+    @pytest.mark.parametrize("method", ["_chat", "_chat_prose"])
+    def test_a_failed_retry_fails_with_the_cut_answer(
+        self, method: str, recorded: list[CutAnswer], caplog: pytest.LogCaptureFixture
     ) -> None:
-        """As before #825: ``_chat`` refuses it with its text, the cut recorded with no retry tokens."""
+        """One attempt, never backed off: the cut answer before it is refused with its text."""
         client = Client(cut("x", LIMIT, LIMIT), ConnectionError("down"))
 
         with pytest.raises(TruncatedResponseError) as raised:
-            agent_on(client)._chat(MESSAGES)
+            getattr(agent_on(client), method)(MESSAGES)
         assert raised.value.content == "x"
+        assert client.limits == [LIMIT, 2 * LIMIT]
         assert "keeping the cut answer" in caplog.text
         assert (recorded[0].retry_max_tokens, recorded[0].retry_output_tokens, recorded[0].retry_cut) == (
             2 * LIMIT, None, None
         )
 
-    def test_a_failed_retry_keeps_the_cut_prose_with_its_note(self) -> None:
-        """A cut report is still the reader's, marked as cut (the SDK refusing 16384 on Opus 4.1)."""
-        client = Client(cut("Short report", LIMIT, LIMIT), ValueError("Streaming is required"))
+    def test_a_cut_answer_with_no_text_is_asked_again(self, recorded: list[CutAnswer]) -> None:
+        """Thinking took the whole limit (#830): a cut like any other."""
+        client = Client(cut("", LIMIT, LIMIT), finished("done", 2 * LIMIT))
 
-        assert agent_on(client)._chat_prose(MESSAGES) == f"Short report\n\n{CUT_OFF_PROSE_NOTE}"
+        assert agent_on(client)._chat_prose(MESSAGES) == "done"
+        assert client.limits == [LIMIT, 2 * LIMIT]
 
     def test_the_retry_asks_as_the_answer_was_asked(self, recorded: list[CutAnswer]) -> None:
         """Same task, model, messages, temperature and JSON mode; only the limit differs."""
@@ -213,8 +250,8 @@ class TestTheAgentAsksOnceMore:
         assert client.limits == [LIMIT, 2 * LIMIT]
         assert (recorded[0].task_id, recorded[0].model) == ("scoring", "anthropic:scoring-model")
 
-    def test_the_query_expansion_asks_once_more(self) -> None:
-        """The interrogation agent's own call reads the retry's lines."""
+    def test_the_query_expansion_asks_again(self) -> None:
+        """The interrogation agent's expansion reads the retry's lines."""
         from bmlibrarian_lite.agents.interrogation_agent import LiteInterrogationAgent
 
         agent = LiteInterrogationAgent.__new__(LiteInterrogationAgent)
@@ -255,14 +292,35 @@ class TestTheRecord:
         config.storage.data_dir = tmp_path
         storage = LiteStorage(config)
         rows = [
-            CutAnswer("scoring", "anthropic:m", 2048, 2048, 4096, 2500, False, "2026-11-25T00:00:00+00:00"),
-            CutAnswer("citation_extraction", "ollama:m", 4096, 1000, cut_at="2026-11-25T00:00:01+00:00"),
+            CutAnswer("scoring", "anthropic:m", 2048, 2048, 4096, 4096, True, "2026-11-25T00:00:00+00:00"),
+            CutAnswer("scoring", "anthropic:m", 4096, 4096, 8192, 2500, False, "2026-11-25T00:00:01+00:00", 1),
+            CutAnswer("citation_extraction", "ollama:m", 4096, 1000, cut_at="2026-11-25T00:00:02+00:00"),
         ]
         for row in rows:
             storage.record_cut_answer(row)
 
         assert storage.cut_answers() == rows
-        assert storage.cut_answers()[0].retry_cut is False
+        assert storage.cut_answers()[1].retry_cut is False
+
+    def test_a_table_from_before_831_gains_the_attempt(self, tmp_path: Any) -> None:
+        """Its rows read as first answers, and new rows keep their attempt."""
+        config = LiteConfig()
+        config.storage.data_dir = tmp_path
+        LiteStorage(config)
+        db = config.storage.sqlite_path
+        with sqlite3.connect(db) as conn:
+            conn.execute("DROP TABLE cut_answers")
+            conn.execute(
+                "CREATE TABLE cut_answers (task_id TEXT NOT NULL, model TEXT NOT NULL, max_tokens INTEGER NOT NULL,"
+                " output_tokens INTEGER NOT NULL, retry_max_tokens INTEGER, retry_output_tokens INTEGER,"
+                " retry_cut INTEGER CHECK (retry_cut IN (0, 1)), cut_at TEXT NOT NULL)"
+            )
+            conn.execute("INSERT INTO cut_answers VALUES ('scoring', 'anthropic:m', 2048, 2048, NULL, NULL, NULL, 't0')")
+
+        storage = LiteStorage(config)
+        storage.record_cut_answer(CutAnswer("scoring", "anthropic:m", 4096, 4096, cut_at="t1", attempt=1))
+
+        assert [r.attempt for r in storage.cut_answers()] == [0, 1]
 
     def test_the_app_records_through_its_storage(self, tmp_path: Any) -> None:
         """The recorder the app sets writes the agent's cut to SQLite."""
@@ -352,15 +410,13 @@ class TestTheQuestionsOwnQuery:
         self, recorded: list[CutAnswer], caplog: pytest.LogCaptureFixture
     ) -> None:
         """Even one that parses: the fallback query is used, and the log says why."""
-        client = Client(
-            cut(QUERY_ANSWER, QUERY_LIMIT, QUERY_LIMIT), cut(QUERY_ANSWER, 2 * QUERY_LIMIT, 2 * QUERY_LIMIT)
-        )
+        client = Client(*(cut(QUERY_ANSWER, n * QUERY_LIMIT, n * QUERY_LIMIT) for n in (1, 2, 4, 8)))
 
         query = search_agent_on(client).convert_query("Does aspirin prevent stroke?")
 
         assert query.generation_model == "fallback"
         assert "reached its token limit" in caplog.text
-        assert [row.retry_cut for row in recorded] == [True]
+        assert [row.retry_cut for row in recorded] == [True, True, True, None]
 
     def test_a_refused_query_answer_is_never_parsed(self, caplog: pytest.LogCaptureFixture) -> None:
         """Even one that parses: the fallback query is used, and the log says why."""

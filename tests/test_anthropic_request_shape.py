@@ -15,6 +15,7 @@ import anthropic._base_client as _sdk_base
 import pytest
 
 from bmlibrarian_lite.constants import (
+    ANTHROPIC_NONSTREAMING_MAX_TOKENS,
     ANTHROPIC_RETIRED_MODEL_SUCCESSORS,
     DEFAULT_LLM_MODEL,
     LLM_PROVIDERS,
@@ -22,6 +23,7 @@ from bmlibrarian_lite.constants import (
     QUALITY_ASSESSOR_MODEL,
     QUALITY_CLASSIFIER_MODEL,
 )
+from bmlibrarian_lite.exceptions import OutputLimitExceededError
 from bmlibrarian_lite.gui.settings_dialog import FALLBACK_CLAUDE_MODELS
 from bmlibrarian_lite.llm.data_types import LLMMessage
 from bmlibrarian_lite.llm.providers.anthropic import AnthropicProvider
@@ -97,3 +99,77 @@ def test_no_default_or_offered_model_is_retired() -> None:
 
     assert not offered & set(ANTHROPIC_RETIRED_MODEL_SUCCESSORS)
     assert not set(ANTHROPIC_RETIRED_MODEL_SUCCESSORS.values()) & set(ANTHROPIC_RETIRED_MODEL_SUCCESSORS)
+
+
+def _stream_body(text: str, stop_reason: str, output_tokens: int) -> str:
+    """A Messages answer as the server streams it."""
+    events = [
+        ("message_start", {"type": "message_start", "message": {**_REPLY, "content": [], "stop_reason": None}}),
+        ("content_block_start", {"type": "content_block_start", "index": 0,
+                                 "content_block": {"type": "text", "text": ""}}),
+        ("content_block_delta", {"type": "content_block_delta", "index": 0,
+                                 "delta": {"type": "text_delta", "text": text}}),
+        ("content_block_stop", {"type": "content_block_stop", "index": 0}),
+        ("message_delta", {"type": "message_delta", "delta": {"stop_reason": stop_reason, "stop_sequence": None},
+                           "usage": {"output_tokens": output_tokens}}),
+        ("message_stop", {"type": "message_stop"}),
+    ]
+    return "".join(f"event: {name}\ndata: {json.dumps(data)}\n\n" for name, data in events)
+
+
+def _provider_answering(handle: object) -> AnthropicProvider:
+    """An AnthropicProvider whose real SDK client is answered by ``handle``."""
+    provider = AnthropicProvider(api_key="synthetic-test-key")
+    provider._client = anthropic.Anthropic(
+        api_key="synthetic-test-key", max_retries=0,
+        http_client=_httpx.Client(transport=_httpx.MockTransport(handle)),  # type: ignore[arg-type]
+    )
+    return provider
+
+
+def test_a_limit_past_the_non_streaming_bound_streams() -> None:
+    """The SDK refuses 65,536 without streaming (#831); streamed, the answer reads as one."""
+    sent: list[dict[str, object]] = []
+
+    def handle(request: _httpx.Request) -> _httpx.Response:
+        sent.append(json.loads(request.content))
+        return _httpx.Response(200, text=_stream_body("long answer", "max_tokens", 65536),
+                               headers={"content-type": "text/event-stream"})
+
+    response = _provider_answering(handle).chat(
+        [LLMMessage(role="user", content="q")], model="claude-sonnet-5-5", max_tokens=65536)
+
+    assert sent[0]["stream"] is True and sent[0]["max_tokens"] == 65536
+    assert (response.content, response.stop_reason, response.output_tokens, response.max_tokens) == (
+        "long answer", "max_tokens", 65536, 65536)
+
+
+def test_a_limit_at_the_bound_does_not_stream() -> None:
+    """The control: every first request is asked as before."""
+    sent: list[dict[str, object]] = []
+    _provider_sending_to(sent).chat([LLMMessage(role="user", content="q")], max_tokens=ANTHROPIC_NONSTREAMING_MAX_TOKENS)
+
+    assert "stream" not in sent[0]
+
+
+def _refusing(message: str) -> AnthropicProvider:
+    """A provider whose server answers every request with a 400 saying *message*."""
+    return _provider_answering(lambda _request: _httpx.Response(400, json={
+        "type": "error", "error": {"type": "invalid_request_error", "message": message}}))
+
+
+def test_a_limit_past_the_models_maximum_raises_the_stated_maximum() -> None:
+    """The API's own wording (2026-11-26), streamed or not."""
+    message = ("max_tokens: 10000000 > 128000, which is the maximum allowed number of output tokens "
+               "for claude-haiku-5-5")
+    for limit in (4096, 10_000_000):
+        with pytest.raises(OutputLimitExceededError) as raised:
+            _refusing(message).chat([LLMMessage(role="user", content="q")], model="claude-haiku-5-5",
+                                    max_tokens=limit)
+        assert raised.value.maximum == 128000
+
+
+def test_any_other_refusal_is_raised_as_it_came() -> None:
+    """The control: a 400 that states no maximum is not read as one."""
+    with pytest.raises(anthropic.BadRequestError):
+        _refusing("messages: at least one message is required").chat([LLMMessage(role="user", content="q")])

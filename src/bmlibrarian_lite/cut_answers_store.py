@@ -14,7 +14,7 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-"""The answers cut at their token limit, one row each (#825).
+"""The answers cut at their token limit, one row each (#825, #831).
 
 SQL only. Every function takes an open connection; ``LiteStorage`` opens it
 and commits.
@@ -38,9 +38,21 @@ CREATE TABLE IF NOT EXISTS {TABLE} (
     retry_max_tokens INTEGER,  -- NULL: not asked again
     retry_output_tokens INTEGER,  -- NULL: no retry, or it raised
     retry_cut INTEGER CHECK (retry_cut IN (0, 1)),
-    cut_at TEXT NOT NULL  -- ISO, UTC
+    cut_at TEXT NOT NULL,  -- ISO, UTC
+    attempt INTEGER NOT NULL DEFAULT 0  -- 0: the first answer; n: the nth retry
 );
 """
+
+
+def create(conn: sqlite3.Connection) -> None:
+    """Create the table, or add the ``attempt`` column a table from before #831 lacks.
+
+    Args:
+        conn: An open connection.
+    """
+    conn.executescript(SCHEMA)
+    if "attempt" not in {row[1] for row in conn.execute(f"PRAGMA table_info({TABLE})")}:
+        conn.execute(f"ALTER TABLE {TABLE} ADD COLUMN attempt INTEGER NOT NULL DEFAULT 0")
 
 _COLUMNS = [f.name for f in fields(CutAnswer)]
 

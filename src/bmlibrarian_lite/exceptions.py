@@ -245,15 +245,11 @@ class SearchFailedError(NetworkError):
         raise SearchFailedError([RetrievalShortfall(provider, failure)])
     """
 
-    def __init__(
-        self, shortfalls: "Iterable[RetrievalShortfall]", notice: str | None = None
-    ) -> None:
+    def __init__(self, shortfalls: "Iterable[RetrievalShortfall]") -> None:
         """Initialize the search failed error.
 
         Args:
             shortfalls: What failed, at least one.
-            notice: What else the reader must be told about the search, such
-                as that the model's answer naming its queries was cut off.
 
         Raises:
             ValueError: If there are no shortfalls: a failure that names
@@ -270,7 +266,6 @@ class SearchFailedError(NetworkError):
             f"The search could not be completed: {describe_search_shortfalls(recorded)}."
         )
         self.shortfalls = recorded
-        self.notice = notice
 
 
 class RetryExhaustedError(NetworkError):
@@ -340,23 +335,44 @@ class JSONParseError(LLMError):
 class TruncatedResponseError(LLMError):
     """The model's answer reached its token limit, so it is incomplete.
 
+    Raised once the larger limits it was asked again with are spent (#831).
     Asked again with the same limit, it is likely cut off again, each time
     paid, so a caller that would retry an unusable answer stops instead.
 
     Attributes:
-        content: What the model wrote before the limit, for a caller that can
-            use its complete parts.
+        content: What the model wrote before the limit. It points at why it
+            ran so long (a looping model, a prompt inviting a long answer,
+            thinking that never ends); no part of it is read as the answer.
     """
 
     def __init__(self, message: str, content: str = "") -> None:
         """Initialize a cut-off answer error.
 
         Args:
-            message: Error message (our own text, never the provider's)
+            message: Error message: our own text and the model's answer,
+                never the provider's error text
             content: What the model wrote before the limit
         """
         super().__init__(message)
         self.content = content
+
+
+class OutputLimitExceededError(LLMError):
+    """The provider refused a token limit past what the model can produce.
+
+    Attributes:
+        maximum: The model's maximum output, as the refusal stated it.
+    """
+
+    def __init__(self, message: str, maximum: int) -> None:
+        """Initialize a refused-limit error.
+
+        Args:
+            message: Error message (our own text, never the provider's)
+            maximum: The model's maximum output tokens
+        """
+        super().__init__(message)
+        self.maximum = maximum
 
 
 class RefusedResponseError(LLMError):
