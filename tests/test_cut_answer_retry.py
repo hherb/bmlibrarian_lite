@@ -8,18 +8,20 @@ The benchmarks keep fixed limits: they call the client directly.
 
 import sqlite3
 from typing import Any
+from unittest.mock import MagicMock
 
 import pytest
 
 from bmlibrarian_lite import cut_answers
 from bmlibrarian_lite.agents.base import CUT_OFF_PROSE_NOTE, LiteBaseAgent
+from bmlibrarian_lite.agents.search_agent import LiteSearchAgent
 from bmlibrarian_lite.config import LiteConfig
-from bmlibrarian_lite.constants import CUT_ANSWER_RETRY_MAX_TOKENS
+from bmlibrarian_lite.constants import CUT_ANSWER_RETRY_MAX_TOKENS, SHORT_ANSWER_MAX_TOKENS
 from bmlibrarian_lite.cut_answers import CutAnswer, raised_limit
 from bmlibrarian_lite.data_models import EvaluationErrorCode
 from bmlibrarian_lite.exceptions import TruncatedResponseError
 from bmlibrarian_lite.llm import LLMMessage, LLMResponse
-from bmlibrarian_lite.llm.data_types import STOP_REASON_MAX_TOKENS
+from bmlibrarian_lite.llm.data_types import STOP_REASON_MAX_TOKENS, STOP_REASON_REFUSAL
 from bmlibrarian_lite.storage import LiteStorage
 from tests.test_benchmark_failures import ScriptedClient, score_once
 
@@ -318,3 +320,55 @@ def test_the_benchmark_keeps_its_fixed_limit() -> None:
 
     assert len(client.calls) == 1
     assert scored.score == EvaluationErrorCode.RESPONSE_TOO_LARGE.value
+
+
+QUERY_ANSWER = '{"concepts": [{"name": "c", "mesh_terms": ["Aspirin"], "keywords": []}]}'
+# The converter's own limit, which overrides the task's
+QUERY_LIMIT = SHORT_ANSWER_MAX_TOKENS
+
+
+def search_agent_on(client: Client) -> LiteSearchAgent:
+    """A search agent whose query conversion runs on Anthropic, calling *client*."""
+    config = LiteConfig._from_dict({"models": {"tasks": {"query_conversion": {
+        "provider": "anthropic", "model": "test-model", "max_tokens": 4 * QUERY_LIMIT,
+    }}}})
+    return LiteSearchAgent(storage=MagicMock(), config=config, llm_client=client)  # type: ignore[arg-type]
+
+
+class TestTheQuestionsOwnQuery:
+    """The query converter asks through ``_chat``, so its cut answers are retried too (#827)."""
+
+    def test_a_cut_query_answer_is_asked_again_and_recorded(self, recorded: list[CutAnswer]) -> None:
+        """The retry's answer makes the query; the cut is recorded under its task."""
+        client = Client(cut("{", QUERY_LIMIT, QUERY_LIMIT), finished(QUERY_ANSWER, 2 * QUERY_LIMIT))
+
+        query = search_agent_on(client).convert_query("Does aspirin prevent stroke?")
+
+        assert client.limits == [QUERY_LIMIT, 2 * QUERY_LIMIT]
+        assert query.query_string.startswith('(("Aspirin"[mh]))')
+        assert [(row.task_id, row.retry_cut) for row in recorded] == [("query_conversion", False)]
+
+    def test_a_query_answer_still_cut_is_never_parsed(
+        self, recorded: list[CutAnswer], caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Even one that parses: the fallback query is used, and the log says why."""
+        client = Client(
+            cut(QUERY_ANSWER, QUERY_LIMIT, QUERY_LIMIT), cut(QUERY_ANSWER, 2 * QUERY_LIMIT, 2 * QUERY_LIMIT)
+        )
+
+        query = search_agent_on(client).convert_query("Does aspirin prevent stroke?")
+
+        assert query.generation_model == "fallback"
+        assert "reached its token limit" in caplog.text
+        assert [row.retry_cut for row in recorded] == [True]
+
+    def test_a_refused_query_answer_is_never_parsed(self, caplog: pytest.LogCaptureFixture) -> None:
+        """Even one that parses: the fallback query is used, and the log says why."""
+        declined = LLMResponse(content=QUERY_ANSWER, model="m", stop_reason=STOP_REASON_REFUSAL)
+        client = Client(declined)
+
+        query = search_agent_on(client).convert_query("Does aspirin prevent stroke?")
+
+        assert query.generation_model == "fallback"
+        assert "declined to answer" in caplog.text
+        assert len(client.limits) == 1

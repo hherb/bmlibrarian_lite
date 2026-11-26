@@ -144,6 +144,8 @@ DEFAULT_LLM_MAX_TOKENS = 4096
 # A score (603), a query (747), a classification (431, #814); unmeasured:
 # the interrogation tab's answer, summary and query expansion.
 SHORT_ANSWER_MAX_TOKENS = 2048
+# The question's own query: low, for the same query each time
+QUERY_CONVERSION_TEMPERATURE = 0.1
 # Alternative queries (1,764), citations (1,190 from a full-text window), a
 # quality assessment (1,347), a brief summary (1,326).
 GENERATION_MAX_TOKENS = 4096

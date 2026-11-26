@@ -24,7 +24,7 @@ comprehensive queries that often fail due to length limits.
 Usage:
     from bmlibrarian_lite.query_converter import LiteQueryConverter
 
-    converter = LiteQueryConverter(llm_client=client, model="anthropic:claude-sonnet-4")
+    converter = LiteQueryConverter(ask=agent.convert_ask, model="anthropic:claude-sonnet-4")
     query = converter.convert("What is the normal optic nerve sheath diameter?")
     print(query.query_string)
     # Output: ("Optic Nerve"[mh] OR "optic nerve sheath"[tiab]) AND humans[mh] AND hasabstract
@@ -33,10 +33,9 @@ Usage:
 import json
 import logging
 import re
+from collections.abc import Callable
 from typing import Any, Optional
 
-from bmlibrarian_lite.constants import SHORT_ANSWER_MAX_TOKENS
-from bmlibrarian_lite.llm import LLMClient, LLMMessage
 from bmlibrarian_lite.pubmed.data_types import PubMedQuery
 
 logger = logging.getLogger(__name__)
@@ -96,27 +95,22 @@ class LiteQueryConverter:
     without excessive synonym expansion that causes HTTP 400/414 errors.
 
     Attributes:
-        llm_client: LLM client for query conversion
-        model: Model to use for conversion
+        ask: Sends the prompt, returns the answer's text
+        model: Model the answer comes from, recorded on the query
     """
 
-    def __init__(
-        self,
-        llm_client: LLMClient,
-        model: str,
-        temperature: float = 0.1,
-    ) -> None:
+    def __init__(self, ask: Callable[[str], str], model: str) -> None:
         """
         Initialize the lite query converter.
 
         Args:
-            llm_client: LLM client for query conversion
+            ask: Sends the prompt and returns the answer's text; raises when
+                the answer was cut off or refused, so it is never parsed as
+                complete (:meth:`LiteSearchAgent.convert_ask`, #827)
             model: Model string (e.g., "anthropic:claude-sonnet-4")
-            temperature: LLM temperature (low for consistency)
         """
-        self.llm_client = llm_client
+        self.ask = ask
         self.model = model
-        self.temperature = temperature
 
     def convert(self, question: str) -> PubMedQuery:
         """
@@ -136,15 +130,7 @@ class LiteQueryConverter:
         try:
             # Get LLM to extract concepts
             prompt = LITE_QUERY_PROMPT.format(question=question)
-            response = self.llm_client.chat(
-                messages=[LLMMessage(role="user", content=prompt)],
-                model=self.model,
-                temperature=self.temperature,
-                max_tokens=SHORT_ANSWER_MAX_TOKENS,
-                json_mode=True,
-            )
-
-            data = self._parse_json(response.content)
+            data = self._parse_json(self.ask(prompt))
             if data is None:
                 logger.warning("Failed to parse LLM response, using fallback")
                 return self._create_fallback_query(question)
