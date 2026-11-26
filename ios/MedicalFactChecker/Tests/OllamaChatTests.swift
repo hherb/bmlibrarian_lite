@@ -42,8 +42,9 @@ struct OllamaChatTests {
     }
 
     @Test func otherProvidersAreSentNoOllamaOptions() async throws {
-        let openAI = LLMService(baseURL: URL(string: "https://api.openai.com/v1")!, apiKey: "k", model: "m", provider: .openai)
-        let body = try await openAI.requestBody(messages: [LLMService.userMessage("hi")], temperature: 0.1, maxTokens: 10)
+        // DeepSeek: OpenAI itself is sent max_completion_tokens (CutAnswerRetryTests)
+        let deepSeek = LLMService(baseURL: URL(string: "https://api.deepseek.com/v1")!, apiKey: "k", model: "m", provider: .deepseek)
+        let body = try await deepSeek.requestBody(messages: [LLMService.userMessage("hi")], temperature: 0.1, maxTokens: 10)
         let json = String(decoding: body, as: UTF8.self)
         #expect(!json.contains("num_ctx") && !json.contains("shift"), "\(json)")
         #expect(json.contains("\"max_tokens\":10"))

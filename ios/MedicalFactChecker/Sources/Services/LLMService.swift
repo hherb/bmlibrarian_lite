@@ -54,7 +54,10 @@ actor LLMService {
     private var apiKey: String
     private var model: String
     private var provider: LLMProvider?
-    private let session: URLSession
+    /// The session a test injected, used for every request as it is.
+    private let injectedSession: URLSession?
+    /// Sessions built per timeout, by ``timeouts(provider:maxTokens:)``.
+    private var sessions: [Timeouts: URLSession] = [:]
 
     // MARK: - Usage Tracking
 
@@ -64,7 +67,8 @@ actor LLMService {
     // MARK: - Initialization
 
     /// - Parameter session: The session requests go through; a test passes one
-    ///   with a stub protocol. Nil builds one with the provider's timeouts.
+    ///   with a stub protocol. Nil builds one per timeout, from the provider and
+    ///   each request's limit (``timeouts(provider:maxTokens:)``).
     init(
         baseURL: URL, apiKey: String, model: String, provider: LLMProvider? = nil,
         session: URLSession? = nil
@@ -73,17 +77,57 @@ actor LLMService {
         self.apiKey = apiKey
         self.model = model
         self.provider = provider
+        self.injectedSession = session
+    }
 
-        // Use extended timeouts for Ollama since local models can be slower,
-        // especially for report generation with longer outputs
-        let useExtendedTimeout = provider == .ollama
-        let requestTimeout = useExtendedTimeout ? Self.extendedRequestTimeout : Self.defaultRequestTimeout
-        let resourceTimeout = useExtendedTimeout ? Self.extendedResourceTimeout : Self.defaultResourceTimeout
+    /// A request's timeouts, in seconds.
+    struct Timeouts: Hashable {
+        /// The longest wait for the next data (`timeoutIntervalForRequest`).
+        let request: TimeInterval
+        /// The longest a whole request may take (`timeoutIntervalForResource`).
+        let resource: TimeInterval
+    }
 
+    /// The timeouts for a request asking `maxTokens`.
+    ///
+    /// Ollama waits longer, since local models can be slower. A non-streamed
+    /// answer arrives only when it is whole, so a request asking more than
+    /// `WorkflowConstants.timeoutBaseTokens` waits that many times longer
+    /// (#831): a cut answer asked again with 8× its limit would otherwise time
+    /// out unasked.
+    ///
+    /// - Parameters:
+    ///   - provider: The configured provider.
+    ///   - maxTokens: The request's limit.
+    /// - Returns: The base timeouts times ``timeoutScale(maxTokens:)``.
+    static func timeouts(provider: LLMProvider?, maxTokens: Int) -> Timeouts {
+        let extended = provider == .ollama
+        let scale = Double(timeoutScale(maxTokens: maxTokens))
+        return Timeouts(
+            request: (extended ? extendedRequestTimeout : defaultRequestTimeout) * scale,
+            resource: (extended ? extendedResourceTimeout : defaultResourceTimeout) * scale
+        )
+    }
+
+    /// How many times the base timeouts a request asking `maxTokens` gets: at
+    /// least 1, else `maxTokens` over `WorkflowConstants.timeoutBaseTokens`, rounded up.
+    static func timeoutScale(maxTokens: Int) -> Int {
+        let base = WorkflowConstants.timeoutBaseTokens
+        return max(1, (maxTokens + base - 1) / base)
+    }
+
+    /// The session for a request asking `maxTokens`: the injected one, or one
+    /// built for its ``timeouts(provider:maxTokens:)``, kept for later requests.
+    private func session(for maxTokens: Int) -> URLSession {
+        if let injectedSession { return injectedSession }
+        let timeouts = Self.timeouts(provider: provider, maxTokens: maxTokens)
+        if let session = sessions[timeouts] { return session }
         let config = URLSessionConfiguration.default
-        config.timeoutIntervalForRequest = requestTimeout
-        config.timeoutIntervalForResource = resourceTimeout
-        self.session = session ?? URLSession(configuration: config)
+        config.timeoutIntervalForRequest = timeouts.request
+        config.timeoutIntervalForResource = timeouts.resource
+        let session = URLSession(configuration: config)
+        sessions[timeouts] = session
+        return session
     }
 
     /// Create service from current app settings.
@@ -130,24 +174,31 @@ actor LLMService {
     ///
     /// Tries up to `maxRetries` times with exponential backoff for transient failures
     /// (network errors, rate limits, server errors). An answer cut at its token
-    /// limit is asked once more with the limit ``raisedLimit(finishReason:outputTokens:maxTokens:)``
-    /// allows (#822, the desktop's #825), and the retry's answer is returned, cut
-    /// or not. The retry is one attempt: one that fails (a twice-as-long answer
-    /// can pass the request timeout) is logged and the cut answer returned. A cut
-    /// answer is returned as written, and its caller reads it as before (#829);
-    /// one with no text (thinking took the limit) is asked again the same way,
-    /// and still textless it throws `LLMError.cutBeforeWriting` (#830). A reply
-    /// that declined to answer, the retry's too, throws `LLMError.refused`, never
-    /// retried (#819).
+    /// limit is asked again with the limit
+    /// ``raisedLimit(finishReason:outputTokens:maxTokens:room:attempt:)`` allows,
+    /// twice the last, up to `WorkflowConstants.cutAnswerMaxRetries` times (#831,
+    /// the desktop's rule); the first answer not cut is returned. Each retry is
+    /// one request, never backed off. A retry the provider refuses because its
+    /// limit passes the model's maximum (``statedOutputMaximum(_:)``) is asked
+    /// once more within that maximum, which caps every later retry; Ollama's
+    /// cap is what `num_ctx` leaves beside the prompt.
+    ///
+    /// **No part of a cut answer is used** (#829, #831): one still cut, one
+    /// that stopped short of its limit (the context ran out) and one whose
+    /// retry failed throw ``LLMError/cut(model:maxTokens:outputTokens:content:after:)``,
+    /// quoting the text, with or without any (#830). Every cut answer is logged
+    /// with its text. A reply that declined to answer, a retry's too, throws
+    /// `LLMError.refused`, never retried (#819).
     ///
     /// - Parameters:
     ///   - messages: Array of chat messages.
     ///   - temperature: Sampling temperature (0.0-2.0).
     ///   - maxTokens: Maximum tokens in response.
     ///   - jsonMode: Ignored - included for API compatibility. Request JSON in prompts instead.
-    ///   - retryingCut: False keeps the limit fixed (the connection test's ten tokens).
+    ///   - retryingCut: False keeps the limit fixed and returns a cut answer that
+    ///     has text as written (the connection test's ten tokens).
     /// - Returns: Tuple of (response content, usage statistics); after a cut
-    ///   answer's retry, the usage is both requests'.
+    ///   answer's retries, the usage is every request's.
     func chat(
         messages: [ChatMessage],
         temperature: Double = 0.1,
@@ -155,52 +206,117 @@ actor LLMService {
         jsonMode: Bool = false,
         retryingCut: Bool = true
     ) async throws -> (content: String, usage: LLMUsage) {
-        let reply = try await chatRetryingFailures(messages: messages, temperature: temperature, maxTokens: maxTokens)
-        guard retryingCut,
-              let raised = Self.raisedLimit(
-                finishReason: reply.finishReason, outputTokens: reply.usage.outputTokens, maxTokens: maxTokens
-              )
-        else {
-            if Self.isCut(reply.finishReason) {
-                print("[LLMService] The answer from \(model) stopped at a length limit, not asked again (\(reply.usage.outputTokens) of \(maxTokens) tokens)")
+        var reply = try await chatRetryingFailures(messages: messages, temperature: temperature, maxTokens: maxTokens)
+        guard Self.isCut(reply.finishReason) else { return (reply.content, reply.usage) }
+        var limit = maxTokens
+        guard retryingCut else {
+            print("[LLMService] The answer from \(model) stopped at a length limit, not asked again (\(reply.usage.outputTokens) of \(limit) tokens)")
+            if reply.content.isEmpty { throw cutError(reply, maxTokens: limit) }
+            return (reply.content, reply.usage)
+        }
+        var usage = reply.usage
+        // Ollama sizes num_ctx per request, up to its maximum beside the prompt
+        var room: Int? = provider == .ollama
+            ? BioMedLitConstants.ollamaMaxNumCtx - reply.usage.inputTokens - BioMedLitConstants.ollamaTemplateTokens
+            : nil
+        var attempt = 0
+        var textLogged = false  // a refused limit asks the same attempt again
+        while true {
+            let raised = Self.raisedLimit(
+                finishReason: reply.finishReason, outputTokens: reply.usage.outputTokens,
+                maxTokens: limit, room: room, attempt: attempt
+            )
+            if !textLogged {
+                print(
+                    "[LLMService] The answer from \(model) reached its token limit (\(limit); "
+                        + "\(reply.usage.outputTokens) tokens generated, attempt \(attempt)); "
+                        + (raised.map { "asking again with \($0)." } ?? "not asked again.")
+                        + " \(WorkflowConstants.cutAnswerQuoteHeading)\n\(reply.content)"
+                )
             }
-            try Self.requireWritten(reply)
-            return (reply.content, reply.usage)
+            guard let raised else { throw cutError(reply, maxTokens: limit) }
+            let retry: (content: String, usage: LLMUsage, finishReason: String?)
+            do {
+                retry = try await chatRetryingFailures(
+                    messages: messages, temperature: temperature, maxTokens: raised, attempts: 1
+                )
+            } catch {
+                // A refusal is an answer, not a failed request: the desktop raises it too
+                if case LLMError.refused = error { throw error }
+                if let maximum = Self.statedOutputMaximum(error), maximum < raised {
+                    print("[LLMService] \(model) produces at most \(maximum) tokens; asking within it")
+                    room = maximum
+                    textLogged = true
+                    continue
+                }
+                try Task.checkCancellation()
+                // Still a cut, never re-sent as transient: a retry is one request (#831)
+                let failure = Self.failureName(error)
+                print("[LLMService] Asking \(model) again with \(raised) failed (\(failure))")
+                throw cutError(reply, maxTokens: limit, after: "; asking again with \(raised) tokens failed (\(failure))")
+            }
+            usage = LLMUsage(
+                model: model, provider: provider,
+                inputTokens: usage.inputTokens + retry.usage.inputTokens,
+                outputTokens: usage.outputTokens + retry.usage.outputTokens
+            )
+            guard Self.isCut(retry.finishReason) else { return (retry.content, usage) }
+            (reply, limit, attempt, textLogged) = (retry, raised, attempt + 1, false)
         }
-        print("[LLMService] The answer from \(model) reached its token limit (\(maxTokens)); asking once more with \(raised)")
-        let retry: (content: String, usage: LLMUsage, finishReason: String?)
-        do {
-            retry = try await chatRetryingFailures(messages: messages, temperature: temperature, maxTokens: raised, attempts: 1)
-        } catch LLMError.refused {
-            // A refusal is an answer, not a failed request: the desktop raises it too
-            throw LLMError.refused
-        } catch {
-            try Task.checkCancellation()
-            print("[LLMService] Asking \(model) once more with \(raised) failed (\(error.localizedDescription)); keeping the cut answer")
-            try Self.requireWritten(reply)
-            return (reply.content, reply.usage)
-        }
-        if Self.isCut(retry.finishReason) {
-            print("[LLMService] The answer from \(model) reached its token limit again (\(retry.usage.outputTokens) of \(raised) tokens)")
-        }
-        try Self.requireWritten(retry)
-        let usage = LLMUsage(
-            model: model,
-            provider: provider,
-            inputTokens: reply.usage.inputTokens + retry.usage.inputTokens,
-            outputTokens: reply.usage.outputTokens + retry.usage.outputTokens
-        )
-        return (retry.content, usage)
     }
 
-    /// Throws when `reply` was cut before it wrote any text (#830): with nothing
-    /// written there is no answer to keep, as the desktop's `_chat` raises
-    /// `TruncatedResponseError`.
-    private static func requireWritten(_ reply: (content: String, usage: LLMUsage, finishReason: String?)) throws {
-        if reply.content.isEmpty && isCut(reply.finishReason) {
-            throw LLMError.cutBeforeWriting(outputTokens: reply.usage.outputTokens)
+    /// The error for an answer cut at `maxTokens`, quoting what it wrote (#831).
+    private func cutError(
+        _ reply: (content: String, usage: LLMUsage, finishReason: String?), maxTokens: Int, after: String = ""
+    ) -> LLMError {
+        .cut(model: model, maxTokens: maxTokens, outputTokens: reply.usage.outputTokens, content: reply.content, after: after)
+    }
+
+    /// A failed retry as a cut answer's error names it: our own words, never a
+    /// provider's body text, which can carry a credential (#330).
+    static func failureName(_ error: Error) -> String {
+        switch error {
+        case LLMError.apiError(let statusCode, _), LLMError.httpError(let statusCode):
+            return "HTTP \(statusCode)"
+        case let urlError as URLError:
+            return "URLError \(urlError.code.rawValue): \(urlError.localizedDescription)"
+        default:
+            return String(describing: type(of: error))
         }
     }
+
+    /// The model's maximum output a 400 states, when the provider refused a
+    /// limit past it (#831). The wordings were probed on 2026-11-26 (Mistral
+    /// and Groq were not):
+    /// - Anthropic, native and OpenAI-compatible: `max_tokens: N > M, which is
+    ///   the maximum allowed number of output tokens for …`
+    /// - OpenAI: `… This model supports at most M completion tokens, …`
+    /// - DeepSeek: `… the valid range of max_tokens is [1, M] …`
+    ///
+    /// - Parameter error: The failed request's error.
+    /// - Returns: M, or nil when the error is no such refusal.
+    static func statedOutputMaximum(_ error: Error) -> Int? {
+        guard case LLMError.apiError(statusCode: 400, let message) = error else { return nil }
+        return statedOutputMaximum(message: message)
+    }
+
+    /// The maximum output a refusal's message states; see ``statedOutputMaximum(_:)``.
+    static func statedOutputMaximum(message: String) -> Int? {
+        for pattern in Self.outputMaximumPatterns {
+            guard let regex = try? Regex(pattern), let match = message.firstMatch(of: regex),
+                  match.output.count > 1, let captured = match.output[1].substring
+            else { continue }
+            if let maximum = Int(captured) { return maximum }
+        }
+        return nil
+    }
+
+    /// Each probed provider's wording of a refused limit, the maximum captured.
+    private static let outputMaximumPatterns = [
+        #"max_tokens: \d+ > (\d+), which is the maximum allowed number of output tokens"#,
+        #"supports at most (\d+) completion tokens"#,
+        #"valid range of max_tokens is \[1, (\d+)\]"#,
+    ]
 
     /// Whether a finish reason says the answer stopped at its token limit:
     /// `length` (chat completions, Ollama's `done_reason`) or `max_tokens`
@@ -209,23 +325,31 @@ actor LLMService {
         finishReason == "length" || finishReason == "max_tokens"
     }
 
-    /// The limit to ask a cut answer again with, or nil not to ask again (#822).
+    /// The limit to ask a cut answer again with, or nil not to ask again (#822, #831).
     ///
     /// The desktop's `cut_answers.raised_limit` rule. An answer that stopped
     /// short of its limit ran out of context window, which a larger limit does
     /// not change; a reply that states no token count cannot show it reached
-    /// its limit either. Without the desktop's `room` cap: Ollama's `num_ctx` is
-    /// sized from each request's own limit (`OllamaContext.numCtx`).
+    /// its limit either.
     ///
     /// - Parameters:
     ///   - finishReason: Why the answer stopped.
     ///   - outputTokens: The tokens it generated, thinking included.
     ///   - maxTokens: The limit it was asked with.
-    /// - Returns: Twice the limit, capped at `WorkflowConstants.cutAnswerRetryMaxTokens`;
-    ///   nil when the answer was not cut at its limit or no larger limit is allowed.
-    static func raisedLimit(finishReason: String?, outputTokens: Int, maxTokens: Int) -> Int? {
-        guard isCut(finishReason), maxTokens > 0, outputTokens >= maxTokens else { return nil }
-        let raised = min(maxTokens * WorkflowConstants.cutAnswerRetryFactor, WorkflowConstants.cutAnswerRetryMaxTokens)
+    ///   - room: The most the model can produce here (a refusal's stated
+    ///     maximum, or what Ollama's `num_ctx` leaves); nil when unknown.
+    ///   - attempt: The cut answer's attempt, 0 for the first answer.
+    /// - Returns: Twice the limit, capped by the room; nil when the answer was
+    ///   not cut at its limit, the `WorkflowConstants.cutAnswerMaxRetries`
+    ///   retries are spent or no larger limit is allowed.
+    static func raisedLimit(
+        finishReason: String?, outputTokens: Int, maxTokens: Int, room: Int? = nil, attempt: Int = 0
+    ) -> Int? {
+        guard isCut(finishReason), maxTokens > 0, outputTokens >= maxTokens,
+              attempt < WorkflowConstants.cutAnswerMaxRetries
+        else { return nil }
+        var raised = maxTokens * WorkflowConstants.cutAnswerRetryFactor
+        if let room { raised = min(raised, room) }
         return raised > maxTokens ? raised : nil
     }
 
@@ -291,7 +415,7 @@ actor LLMService {
         }
         #endif
 
-        let (data, response) = try await session.data(for: request)
+        let (data, response) = try await session(for: maxTokens).data(for: request)
 
         guard let httpResponse = response as? HTTPURLResponse else {
             throw LLMError.invalidResponse
@@ -445,7 +569,7 @@ actor LLMService {
             case .invalidResponse, .emptyResponse:
                 // These might be transient issues
                 return true
-            case .invalidConfiguration, .parseError, .cutBeforeWriting, .refused:
+            case .invalidConfiguration, .parseError, .cut, .refused:
                 // These won't be fixed by retrying
                 return false
             }
@@ -483,7 +607,10 @@ actor LLMService {
     /// OpenAI-compatible endpoint too (#758), so Claude is sent none and samples at
     /// the API default; a nil temperature is left out of the body. `response_format`
     /// is never sent: not every provider supports it (Anthropic doesn't), so prompts
-    /// ask for JSON explicitly.
+    /// ask for JSON explicitly. OpenAI is sent its limit as
+    /// `max_completion_tokens`: its GPT-5 models answer 400 to `max_tokens`
+    /// (probed 2026-11-26 on gpt-5.2, the default); every other provider keeps
+    /// `max_tokens`.
     ///
     /// Ollama is sent its native `/api/chat` body instead: the temperature and
     /// token limit as `options`, with a `num_ctx` sized to hold the request
@@ -513,7 +640,8 @@ actor LLMService {
             model: model,
             messages: messages,
             temperature: provider == .anthropic ? nil : temperature,
-            maxTokens: maxTokens,
+            maxTokens: provider == .openai ? nil : maxTokens,
+            maxCompletionTokens: provider == .openai ? maxTokens : nil,
             responseFormat: nil,
             thinking: thinkingConfig
         )
@@ -636,8 +764,11 @@ struct ChatCompletionRequest: Codable {
     /// Sampling temperature (0.0-2.0). Lower = more deterministic.
     let temperature: Double?
 
-    /// Maximum tokens to generate in the response.
+    /// Maximum tokens to generate in the response; nil for OpenAI.
     let maxTokens: Int?
+
+    /// OpenAI's name for the limit, which its GPT-5 models require; nil elsewhere.
+    var maxCompletionTokens: Int? = nil
 
     /// Optional response format specification.
     let responseFormat: ResponseFormat?
@@ -778,12 +909,21 @@ enum LLMError: LocalizedError {
     case httpError(statusCode: Int)
     case apiError(statusCode: Int, message: String)
     case emptyResponse
-    /// The answer reached its token limit before it wrote any text, after its
-    /// retry with a larger limit where one was allowed (#830).
-    case cutBeforeWriting(outputTokens: Int)
+    /// The answer reached its token limit, after the retries with larger
+    /// limits that were allowed, or a retry failed (`after` names how), so it
+    /// is incomplete and no part of it is used (#829, #830, #831). `content` is
+    /// what it wrote, maybe nothing: it points at why it ran so long (a looping
+    /// model, a prompt inviting a long answer, thinking that never ends).
+    case cut(model: String, maxTokens: Int, outputTokens: Int, content: String, after: String)
     /// The model declined to answer (#819); asked again it likely declines again.
     case refused
     case parseError(String)
+
+    /// Whether this is ``cut(model:maxTokens:outputTokens:content:after:)``.
+    var isCut: Bool {
+        if case .cut = self { return true }
+        return false
+    }
 
     var errorDescription: String? {
         switch self {
@@ -797,8 +937,11 @@ enum LLMError: LocalizedError {
             return "API error \(code): \(message)"
         case .emptyResponse:
             return "Empty response from LLM API"
-        case .cutBeforeWriting(let outputTokens):
-            return "The answer reached its token limit (\(outputTokens) tokens) before it wrote anything"
+        case let .cut(model, maxTokens, outputTokens, content, after):
+            // The desktop's `_cut_error` wording, byte for byte
+            let limit = maxTokens > 0 ? "\(maxTokens) tokens" : "\(outputTokens) tokens generated"
+            return "The answer from \(model) reached its token limit (\(limit)) and is incomplete\(after). "
+                + "\(WorkflowConstants.cutAnswerQuoteHeading)\n\n\(content)"
         case .refused:
             return "The model declined to answer"
         case .parseError(let reason):

@@ -871,10 +871,11 @@ document answer fails with an error that names the limit and quotes the cut
 answer, and query expansion adds no query. A retry that fails (an outage, a
 timeout) fails as the cut answer before it, naming that failure: a retry is
 one request, never re-sent as transient. Every cut answer is logged with its
-text. Desktop so far; the apps follow (#831, #829). **A declined answer**
-(Anthropic's `refusal`) is `MODEL_REFUSED` (−15), never retried, and never
-kept as prose: what a model wrote before declining is not its answer. Python
-only so far.
+text. The apps follow the same rule (#831, #829); a limit a provider refuses is
+read from Anthropic's, OpenAI's and DeepSeek's wording (the developer guide
+lists it). **A declined answer** (Anthropic's `refusal`) is `MODEL_REFUSED`
+(−15), never retried, and never kept as prose: what a model wrote before
+declining is not its answer. Python only so far.
 
 **Spent retries are not a cause.** Every provider failure is retried, so each
 one reaches the agent wrapped in a `RetryExhaustedError`. Recording that

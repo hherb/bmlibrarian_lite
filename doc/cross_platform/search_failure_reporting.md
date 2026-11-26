@@ -404,8 +404,8 @@ ways:
   asked for again, since the same limit likely cuts it off again, each time
   paid. None of its queries is searched, not even the complete ones (#831;
   before, they were): the user is told the answer was cut off, and that an
-  earlier answer held only repeats if one did. Desktop so far; the apps still
-  search a cut answer's complete queries until they port #831.
+  earlier answer held only repeats if one did. The apps follow (#831), with
+  their own name for the setting.
 - An answer the model declined (Anthropic's `refusal`) is not asked for again
   either: the user is told the model declined, and that another Query
   Conversion model may answer.

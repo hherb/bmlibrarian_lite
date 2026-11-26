@@ -118,8 +118,23 @@ apps additionally carry their own store version tags (`swift_*`, `appstore_*`).
   error gives its advice before the quote. A query expansion that fails for
   any other reason than a declined or cut answer now fails the question
   instead of quietly searching the question alone. Every cut answer is
-  logged with its text and recorded in `cut_answers`, one row per try. The
-  apps follow.
+  logged with its text and recorded in `cut_answers`, one row per try.
+- **Apps: a cut answer is asked again up to three times, and one still cut
+  fails (#831, #829).** The iOS/macOS and Android apps follow the desktop.
+  Each retry doubles the last limit, with no fixed cap. When a provider
+  refuses a limit past the model's maximum, the retry is asked within that
+  maximum: Anthropic, OpenAI and DeepSeek state it, as probed on 2026-11-26.
+  Ollama's ceiling is the largest context the app sends beside the prompt.
+  The request timeouts grow with the limit, since an answer arrives only
+  when it is whole. A still-cut answer, or a failed retry, fails its caller
+  with an error that names the limit and quotes the cut answer. Before, a
+  cut answer was read as complete: iOS citations came back empty and
+  Android's report and citation parsers kept the readable part. Smart search
+  runs none of a cut answer's queries and says why. A cut query conversion
+  searches the claim itself. Each cut answer is logged with its text.
+- **Apps: OpenAI's GPT-5 models are asked with `max_completion_tokens`.**
+  They answer 400 to `max_tokens`, so every request to the apps' default
+  OpenAI model (`gpt-5.2`) failed.
 - **Desktop: Claude 5.5's answers are no longer cut off (#821).** Measured
   with the desktop's own prompts on Claude Haiku 5.5 and Sonnet 5.5:
   - Every citation call on a full-text window outgrew its limit of 512, on

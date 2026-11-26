@@ -37,9 +37,17 @@ data class OpenAIChatRequest(
     val model: String,
     /** List of messages in the conversation. */
     val messages: List<OpenAIChatMessage>,
-    /** Maximum tokens to generate. */
+    /** Maximum tokens to generate; null for OpenAI itself, which takes [maxCompletionTokens] (#831). */
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
     @SerialName("max_tokens")
-    val maxTokens: Int,
+    val maxTokens: Int? = null,
+    /**
+     * Maximum tokens to generate, OpenAI's own name: its `gpt-5.2` answers 400 to
+     * `max_tokens` (#831). Left out when null, as every other provider takes `max_tokens`.
+     */
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    @SerialName("max_completion_tokens")
+    val maxCompletionTokens: Int? = null,
     /** Sampling temperature (0.0-2.0). */
     val temperature: Double = 0.0,
     /**

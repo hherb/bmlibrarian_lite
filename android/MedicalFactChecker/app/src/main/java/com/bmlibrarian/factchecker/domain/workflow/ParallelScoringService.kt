@@ -93,13 +93,16 @@ class ParallelScoringService @Inject constructor(
          * Check if an error is a parse error (response parsing failed).
          *
          * An [LLMError.ParseError] (a reply with no score on the scale) is one by
-         * its type; any other error is judged by its message.
+         * its type, and an [LLMError.TruncatedResponseError] never is (its message
+         * quotes the cut answer, which may well say "json", #831); any other error
+         * is judged by its message.
          *
          * @param error The error to check.
          * @return true if this is a parse-related error.
          */
         fun isParseError(error: Throwable): Boolean {
             if (error is LLMError.ParseError) return true
+            if (error is LLMError.TruncatedResponseError) return false
             val message = error.message?.lowercase() ?: return false
             return message.contains("parse") ||
                     message.contains("json") ||
@@ -108,12 +111,15 @@ class ParallelScoringService @Inject constructor(
         }
 
         /**
-         * Check if an error is retryable (transient network issues).
+         * Check if an error is retryable (transient network issues). An answer
+         * still cut after its retries never is (#831), whatever its message quotes
+         * or names (a retry's timeout).
          *
          * @param error The error to check.
          * @return true if this error can be retried.
          */
         fun isRetryableError(error: Throwable): Boolean {
+            if (error is LLMError.TruncatedResponseError) return false
             val message = error.message?.lowercase() ?: return true
             return message.contains("timeout") ||
                     message.contains("connection") ||

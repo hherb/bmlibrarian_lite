@@ -157,6 +157,24 @@ sealed class LLMError(
     ) : LLMError(message)
 
     /**
+     * The answer reached its token limit and is incomplete, after the retries
+     * with larger limits that were allowed (#831), as the desktop's
+     * `TruncatedResponseError`, with or without text. No part of it is used, so
+     * it is never retried as transient, nor asked again as unreadable.
+     *
+     * @property message Error message, quoting the cut answer (our own text and the model's answer)
+     * @property maxTokens The limit the answer reached, 0 when unknown
+     * @property outputTokens The tokens the answer generated, thinking included
+     * @property content The answer as cut, possibly empty
+     */
+    data class TruncatedResponseError(
+        override val message: String,
+        val maxTokens: Int,
+        val outputTokens: Int,
+        val content: String
+    ) : LLMError(message)
+
+    /**
      * Unknown error - unexpected error condition.
      *
      * @property message Error message

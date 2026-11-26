@@ -171,30 +171,35 @@ a git pin). Snapshot rows keep `run_status`/`run_deciding` set-once.
   (`TokenTally::add`), told each paid request's tokens: an unparsed reply, a
   cut answer's retry and an empty or refused reply (`LLMResult.holdsAnswer`
   false) included; a request stating none records no row.
-- **A cut answer is asked again with a larger limit** (desktop #825/#831,
-  apps #822): only one that generated its whole limit; each retry one attempt,
-  never backed off; usage is every request's. **Desktop (#831, PR #838):**
-  three retries (2×, 4×, 8×), capped
-  only by the model: Anthropic's 400 `max_tokens: N > M, which is the maximum
-  allowed…` (probed 2026-11-26: 128000 on Haiku/Sonnet 5.5) is
-  `OutputLimitExceededError`, then asked within M; past 8192 it streams; Ollama
-  only within a configured `context_window`. **Still cut, every caller fails**,
-  prose and smart search too (the error quotes the text); each cut is logged
-  with its text, one `cut_answers` row per try (`attempt`). Never through
-  `_chat_response` (the benchmarks keep fixed limits); the query converter
-  takes its fallback (#827). Apps (one retry, capped at 16384): `raisedLimit`
-  in each `LLMService.chat`, no `room` cap (`num_ctx` is sized per request),
-  the connection test passes `retryingCut: false`, a cut answer still left is
-  only logged. **A cut answer with no text** (thinking took the limit) is asked
-  again too, and still textless it fails naming its limit (#830; iOS
-  `ReplyMessage`, `LLMError.cutBeforeWriting`; Android's nullable
-  `OpenAIChatMessage.content`). **A refusal** (`refusal`/`content_filter`)
-  fails as `LLMError.refused`/`RefusedError`, never retried, a retry's too
-  (#819, the desktop's rule); the HyDE prompts ask for no invented numbers. A
-  refused alternative-query answer marks smart search tried, with the desktop's
-  sentence (iOS `SmartSearchError.refused`, Android
-  `SmartSearchOutcome.Refused`); iOS does not yet record a refused reply's
-  tokens (deferred: #834).
+- **A cut answer is asked again with larger limits** (#825/#831 desktop PR
+  #838; apps #822, #831 this branch): only one that generated its whole limit;
+  up to three retries (2×, 4×, 8×), each one request, never backed off; usage
+  is every request's. Capped only by the model: a 400 stating the maximum
+  (Anthropic `max_tokens: N > M, which is the maximum allowed…`, OpenAI
+  `supports at most M completion tokens`, DeepSeek `valid range of max_tokens
+  is [1, M]`; probed 2026-11-26, Mistral/Groq not) asks the same attempt again
+  within M. Ollama: desktop only within a configured `context_window`; apps
+  `ollamaMaxNumCtx` less the prompt. **Still cut, or a retry failed, every
+  caller fails** with the cut error quoting the text (desktop
+  `TruncatedResponseError`; iOS `LLMError.cut`; Android
+  `LLMError.TruncatedResponseError`); a failed retry is named in our words,
+  never the provider's text. Each cut is logged with its text; the desktop
+  also writes a `cut_answers` row per try. Desktop: past 8192 Anthropic
+  streams; never through `_chat_response` (benchmarks keep fixed limits). Apps:
+  timeouts × ⌈limit/8192⌉ (iOS a session per timeout, Android an OkHttp
+  interceptor reading a Retrofit `@Tag`); the connection test passes
+  `retryingCut: false` (its text is returned, a textless cut fails). Android's
+  scorer must never read a cut error as unreadable or transient (its checks
+  match messages, and the quote can say "json"). Query conversion: the
+  desktop and iOS take their fallback; **Android has none and fails the run
+  (#840, decision wanted)**. Smart search runs none of a cut answer's queries
+  and marks itself tried (iOS `SmartSearchError.cutOff`, Android
+  `SmartSearchOutcome.CutOff`). **OpenAI is sent `max_completion_tokens`** on
+  both apps: gpt-5.x answers 400 to `max_tokens`. **A refusal**
+  (`refusal`/`content_filter`) fails as `LLMError.refused`/`RefusedError`,
+  never retried, a retry's too (#819); the HyDE prompts ask for no invented
+  numbers. iOS does not record a cut or refused reply's tokens in the budget
+  (deferred: #834).
 - **Every search query a fact check ran** (apps, PR #810): `SearchQueryLog`,
   Android Room 11 → 12; not yet seen on a device or simulator.
 - **Strict service JSON** (#781, #784): every service's JSON but esearch is
@@ -279,13 +284,10 @@ Open issues by family; each issue carries the detail. None blocks another.
   stage (spec §5) gets its own spec revision after that report. The shadow
   stage's parked follow-ups (untested paths, an unbounded queue, the wire
   contract fixture): **#815**.
-- **#831, the apps' half** (iOS/macOS + Android together, the desktop's PR the
-  reference; contracts in `doc/cross_platform/analysis_failure_reporting.md`,
-  `search_failure_reporting.md`): probe each provider's limit refusal first;
-  scale timeouts or stream; fail every still-cut caller with its text (settles
-  **#829**); smart search stops searching a cut answer's queries. **#823** a refused desktop quality
-  assessment reads as unclassified (maintainer's call). **#834** the apps'
-  unrecorded paid requests. **#835** a flaky Android wall-clock test.
+- **#823** a refused desktop quality assessment reads as unclassified
+  (maintainer's call). **#834** the apps' unrecorded paid requests. **#835** a
+  flaky Android wall-clock test. **#840** Android's query conversion has no
+  fallback (maintainer's call).
 - **From the bmlib syncs.** PR #757's issues are fixed and unreleased (a
   0.6.1 is the maintainer's call; PRs #765–#767, #771, #774, #775). Still
   deferred: #768, #769 (apps' Ollama), #770 (prompts ask for null), #773

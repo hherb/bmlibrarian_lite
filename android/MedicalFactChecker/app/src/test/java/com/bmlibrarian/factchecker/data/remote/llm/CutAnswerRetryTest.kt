@@ -7,20 +7,31 @@
 package com.bmlibrarian.factchecker.data.remote.llm
 
 import android.util.Log
+import com.bmlibrarian.factchecker.di.AppModule
 import com.bmlibrarian.factchecker.domain.model.LLMError
 import com.bmlibrarian.factchecker.domain.model.LLMProvider
+import com.bmlibrarian.factchecker.util.Constants
 import com.bmlibrarian.factchecker.util.OllamaContext
+import com.jakewharton.retrofit2.converter.kotlinx.serialization.asConverterFactory
 import io.mockk.coEvery
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.mockkStatic
 import io.mockk.unmockkStatic
+import io.mockk.verify
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
+import okhttp3.Interceptor
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Request
 import okhttp3.ResponseBody.Companion.toResponseBody
+import okhttp3.mockwebserver.MockResponse
+import okhttp3.mockwebserver.MockWebServer
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -29,8 +40,15 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import retrofit2.Response
+import retrofit2.Retrofit
+import java.net.SocketTimeoutException
+import java.util.concurrent.TimeUnit
 
-/** #822: an answer cut at its token limit is asked once more with twice the limit, as the desktop does (#825). */
+/**
+ * #822, #831: an answer cut at its token limit is asked again up to three times,
+ * each with twice the last limit, as the desktop does (#825, #831); one still cut
+ * fails with [LLMError.TruncatedResponseError], quoting it.
+ */
 class CutAnswerRetryTest {
 
     private lateinit var openAIApi: OpenAIApi
@@ -39,11 +57,12 @@ class CutAnswerRetryTest {
     private lateinit var service: LLMService
     private val asked = mutableListOf<Int>()
     private val requests = mutableListOf<OpenAIChatRequest>()
+    private val logged = mutableListOf<String>()
 
     @Before
     fun setup() {
         mockkStatic(Log::class)
-        every { Log.w(any<String>(), any<String>()) } returns 0
+        every { Log.w(any<String>(), any<String>()) } answers { logged += secondArg<String>(); 0 }
         openAIApi = mockk()
         anthropicApi = mockk()
         ollamaApi = mockk()
@@ -55,9 +74,10 @@ class CutAnswerRetryTest {
 
     private fun openAIReplies(vararg replies: Response<OpenAIChatResponse>) {
         val queue = ArrayDeque(replies.toList())
-        coEvery { openAIApi.chatCompletion(any(), any(), any()) } answers {
-            requests += thirdArg<OpenAIChatRequest>()
-            asked += thirdArg<OpenAIChatRequest>().maxTokens
+        coEvery { openAIApi.chatCompletion(any(), any(), any(), any()) } answers {
+            val request = thirdArg<OpenAIChatRequest>()
+            requests += request
+            asked += request.maxTokens ?: request.maxCompletionTokens!!
             queue.removeFirst()
         }
     }
@@ -70,13 +90,27 @@ class CutAnswerRetryTest {
         )
     )
 
-    private suspend fun ask(maxTokens: Int = 2048, retryingCut: Boolean = true) = service.chat(
-        provider = LLMProvider.OPENAI, apiKey = "k", model = "m", systemPrompt = "s", userPrompt = "u",
-        maxTokens = maxTokens, retryingCut = retryingCut
+    private fun refused(status: Int, message: String) =
+        Response.error<OpenAIChatResponse>(status, """{"error":{"message":"$message"}}""".toResponseBody())
+
+    private suspend fun ask(
+        maxTokens: Int = 2048,
+        retryingCut: Boolean = true,
+        provider: LLMProvider = LLMProvider.OPENAI,
+        onUsage: UsageSink = NO_USAGE
+    ) = service.chat(
+        provider = provider, apiKey = "k", model = "m", systemPrompt = "s", userPrompt = "u",
+        maxTokens = maxTokens, retryingCut = retryingCut, onUsage = onUsage
     )
 
+    private fun cutError(result: Result<LLMResult>): LLMError.TruncatedResponseError {
+        val error = result.exceptionOrNull()
+        assertTrue("got $result", error is LLMError.TruncatedResponseError)
+        return error as LLMError.TruncatedResponseError
+    }
+
     @Test
-    fun `a cut answer is asked once more with twice the limit`() = runTest {
+    fun `a cut answer is asked again with twice the limit`() = runTest {
         openAIReplies(answer("{\"score\":", "length", 2048), answer("{\"score\": 4}", "stop", 2300))
 
         val result = ask().getOrThrow()
@@ -88,35 +122,124 @@ class CutAnswerRetryTest {
     }
 
     @Test
-    fun `a retry cut again is returned as written, never asked a third time`() = runTest {
-        openAIReplies(answer("first", "length", 2048), answer("second", "length", 4096))
-
-        assertEquals("second", ask().getOrThrow().content)
-        assertEquals(listOf(2048, 4096), asked)
-    }
-
-    @Test
-    fun `a failed retry keeps the cut answer`() = runTest {
+    fun `each retry doubles the last limit, three times`() = runTest {
         openAIReplies(
-            answer("cut", "length", 2048),
-            Response.error(400, """{"error":{"message":"refused"}}""".toResponseBody())
+            answer("a", "length", 2048), answer("b", "length", 4096), answer("c", "length", 8192),
+            answer("whole", "stop", 9000)
         )
 
         val result = ask().getOrThrow()
 
-        assertEquals("cut", result.content)
-        assertEquals(2048, result.outputTokens)
-        assertEquals(listOf(2048, 4096), asked)
+        assertEquals("whole", result.content)
+        assertEquals(listOf(2048, 4096, 8192, 16384), asked)
+        assertEquals("every request is paid for", 400, result.inputTokens)
+        assertEquals(2048 + 4096 + 8192 + 9000, result.outputTokens)
     }
 
     @Test
-    fun `a retry that fails transiently is tried once, not backed off`() = runTest {
+    fun `an answer still cut after three retries fails, quoting the last answer`() = runTest {
+        openAIReplies(
+            answer("a", "length", 2048), answer("b", "length", 4096), answer("c", "length", 8192),
+            answer("{\"score\": 4, \"rationale\": \"the tri", "length", 16384)
+        )
+
+        val error = cutError(ask())
+
+        assertEquals("four requests, never a fifth", listOf(2048, 4096, 8192, 16384), asked)
+        assertEquals(
+            "The answer from m reached its token limit (16384 tokens) and is incomplete. The answer as cut:\n\n" +
+                "{\"score\": 4, \"rationale\": \"the tri",
+            error.message
+        )
+        assertEquals(16384, error.maxTokens)
+        assertEquals(16384, error.outputTokens)
+        assertEquals("{\"score\": 4, \"rationale\": \"the tri", error.content)
+    }
+
+    @Test
+    fun `every cut answer is logged with its text, once`() = runTest {
+        openAIReplies(answer("first", "length", 2048), answer("second", "length", 4096), answer("whole", "stop", 10))
+
+        ask()
+
+        assertEquals(
+            listOf(
+                "The answer from m reached its token limit (2048; 2048 tokens generated, attempt 0); " +
+                    "asking again with 4096. The answer as cut:\nfirst",
+                "The answer from m reached its token limit (4096; 4096 tokens generated, attempt 1); " +
+                    "asking again with 8192. The answer as cut:\nsecond"
+            ),
+            logged
+        )
+    }
+
+    @Test
+    fun `a retry that fails is tried once and fails with the cut answer, naming the failure`() = runTest {
         // a twice-as-long answer can pass the read timeout: re-sending it only adds cost
-        val unavailable = { Response.error<OpenAIChatResponse>(503, "{}".toResponseBody()) }
+        val unavailable = { Response.error<OpenAIChatResponse>(503, "{\"error\":\"sk-secret\"}".toResponseBody()) }
         openAIReplies(answer("cut", "length", 2048), unavailable(), unavailable(), unavailable())
 
-        assertEquals("cut", ask().getOrThrow().content)
+        val error = cutError(ask())
+
         assertEquals(listOf(2048, 4096), asked)
+        assertEquals(
+            "The answer from m reached its token limit (2048 tokens) and is incomplete; asking again with " +
+                "4096 tokens failed (HTTP 503). The answer as cut:\n\ncut",
+            error.message
+        )
+        assertFalse("never the provider's body", error.message.contains("sk-secret"))
+        assertFalse(LLMError.isRetryable(error))
+    }
+
+    @Test
+    fun `a retry that times out is not sent again, and the cut error names the timeout`() = runTest {
+        var calls = 0
+        coEvery { openAIApi.chatCompletion(any(), any(), any(), any()) } answers {
+            if (calls++ == 0) answer("cut", "length", 2048) else throw SocketTimeoutException("timeout")
+        }
+
+        val error = cutError(ask())
+
+        assertEquals("one request per retry", 2, calls)
+        assertTrue(error.message, error.message.contains("; asking again with 4096 tokens failed (SocketTimeoutException)."))
+    }
+
+    @Test
+    fun `a retry refused for a limit past the model's maximum is asked again within it`() = runTest {
+        openAIReplies(
+            answer("cut", "length", 2048),
+            refused(400, "max_tokens: 4096 > 3000, which is the maximum allowed number of output tokens for claude"),
+            answer("whole", "stop", 2500)
+        )
+
+        assertEquals("whole", ask(provider = LLMProvider.DEEPSEEK).getOrThrow().content)
+        assertEquals(listOf(2048, 4096, 3000), asked)
+    }
+
+    @Test
+    fun `an answer cut at the model's stated maximum fails, not asked past it`() = runTest {
+        openAIReplies(
+            answer("first", "length", 2048),
+            refused(400, "This model supports at most 3000 completion tokens, whereas you provided 4096."),
+            answer("second", "length", 3000)
+        )
+
+        val error = cutError(ask())
+
+        assertEquals("the refused request is not an attempt", listOf(2048, 4096, 3000), asked)
+        assertEquals(3000, error.maxTokens)
+        assertEquals("second", error.content)
+        assertEquals("the text is logged once per answer", 2, logged.count { it.contains("The answer as cut:") })
+    }
+
+    @Test
+    fun `a 400 stating no maximum fails the retry`() = runTest {
+        openAIReplies(answer("cut", "length", 2048), refused(400, "refused"))
+
+        val error = cutError(ask())
+
+        assertEquals(listOf(2048, 4096), asked)
+        assertTrue(error.message, error.message.contains("failed (HTTP 400)"))
     }
 
     @Test
@@ -124,7 +247,7 @@ class CutAnswerRetryTest {
         openAIReplies(answer("cut", "length", 2048), answer("whole", "stop", 3000))
 
         service.chat(
-            provider = LLMProvider.OPENAI, apiKey = "k", model = "m", systemPrompt = "rubric", userPrompt = "paper",
+            provider = LLMProvider.DEEPSEEK, apiKey = "k", model = "m", systemPrompt = "rubric", userPrompt = "paper",
             maxTokens = 2048, temperature = 0.3
         )
 
@@ -132,9 +255,25 @@ class CutAnswerRetryTest {
     }
 
     @Test
+    fun `OpenAI is sent max_completion_tokens, DeepSeek max_tokens`() = runTest {
+        openAIReplies(answer("a", "stop", 1), answer("b", "stop", 1))
+        val json = AppModule.provideJson()
+
+        ask(provider = LLMProvider.OPENAI)
+        ask(provider = LLMProvider.DEEPSEEK)
+
+        val openAI = json.encodeToString(OpenAIChatRequest.serializer(), requests[0])
+        val deepSeek = json.encodeToString(OpenAIChatRequest.serializer(), requests[1])
+        assertTrue(openAI, openAI.contains("\"max_completion_tokens\":2048"))
+        assertFalse(openAI, openAI.contains("\"max_tokens\""))
+        assertTrue(deepSeek, deepSeek.contains("\"max_tokens\":2048"))
+        assertFalse(deepSeek, deepSeek.contains("max_completion_tokens"))
+    }
+
+    @Test
     fun `a cancelled retry is a cancellation, not the cut answer`() = runTest {
         var calls = 0
-        coEvery { openAIApi.chatCompletion(any(), any(), any()) } coAnswers {
+        coEvery { openAIApi.chatCompletion(any(), any(), any(), any()) } coAnswers {
             if (calls++ == 0) answer("cut", "length", 2048) else awaitCancellation()
         }
         var got: Result<LLMResult>? = null
@@ -147,27 +286,28 @@ class CutAnswerRetryTest {
         assertNull("a stopped run returns no answer", got)
     }
 
-    @Test
-    fun `Ollama's done_reason length is a cut, asked again with a context that holds it`() = runTest {
-        val sent = mutableListOf<OllamaChatRequest>()
-        val queue = ArrayDeque(listOf("length" to 2048, "stop" to 3000))
-        coEvery { ollamaApi.chat(any(), any()) } answers {
+    private fun ollamaReplies(sent: MutableList<OllamaChatRequest>, promptTokens: Int, vararg replies: Pair<String, Int>) {
+        val queue = ArrayDeque(replies.toList())
+        coEvery { ollamaApi.chat(any(), any(), any()) } answers {
             sent += secondArg<OllamaChatRequest>()
             val (reason, tokens) = queue.removeFirst()
             Response.success(
                 OllamaChatResponse(
                     message = OpenAIChatMessage("assistant", reason),
-                    promptEvalCount = 100,
+                    promptEvalCount = promptTokens,
                     evalCount = tokens,
                     doneReason = reason
                 )
             )
         }
+    }
 
-        val result = service.chat(
-            provider = LLMProvider.OLLAMA, apiKey = "", model = "qwen3", systemPrompt = "s", userPrompt = "u",
-            maxTokens = 2048
-        ).getOrThrow()
+    @Test
+    fun `Ollama's done_reason length is a cut, asked again with a context that holds it`() = runTest {
+        val sent = mutableListOf<OllamaChatRequest>()
+        ollamaReplies(sent, 100, "length" to 2048, "stop" to 3000)
+
+        val result = ask(provider = LLMProvider.OLLAMA).getOrThrow()
 
         assertEquals("stop", result.content)
         assertEquals(listOf(2048, 4096), sent.map { it.options.numPredict })
@@ -176,11 +316,23 @@ class CutAnswerRetryTest {
     }
 
     @Test
-    fun `an answer cut short of its limit is not asked again`() = runTest {
+    fun `Ollama's retry is capped by the room its largest context leaves`() = runTest {
+        val sent = mutableListOf<OllamaChatRequest>()
+        val prompt = Constants.OLLAMA_MAX_NUM_CTX - Constants.OLLAMA_TEMPLATE_TOKENS - 3000
+        ollamaReplies(sent, prompt, "length" to 2048, "length" to 3000)
+
+        val error = cutError(ask(provider = LLMProvider.OLLAMA))
+
+        assertEquals("room spent: not asked a third time", listOf(2048, 3000), sent.map { it.options.numPredict })
+        assertEquals(3000, error.maxTokens)
+    }
+
+    @Test
+    fun `an answer cut short of its limit is not asked again, and fails`() = runTest {
         // the context window ran out: a larger limit does not change that
         openAIReplies(answer("cut", "length", 900))
 
-        assertEquals("cut", ask().getOrThrow().content)
+        assertEquals("cut", cutError(ask()).content)
         assertEquals(listOf(2048), asked)
     }
 
@@ -189,16 +341,17 @@ class CutAnswerRetryTest {
         openAIReplies(answer("whole", "stop", 2048), answer("O", "length", 10))
 
         ask()
-        ask(maxTokens = 10, retryingCut = false)
+        val test = ask(maxTokens = 10, retryingCut = false)
 
         assertEquals(listOf(2048, 10), asked)
+        assertEquals("the connection test's cut answer is still an answer", "O", test.getOrThrow().content)
     }
 
     @Test
     fun `Anthropic's max_tokens stop is a cut`() = runTest {
         val limits = mutableListOf<Int>()
         val queue = ArrayDeque(listOf("max_tokens" to 2048, "end_turn" to 3000))
-        coEvery { anthropicApi.createMessage(any(), any(), any(), any()) } answers {
+        coEvery { anthropicApi.createMessage(any(), any(), any(), any(), any()) } answers {
             limits += arg<AnthropicMessagesRequest>(3).maxTokens
             val (stop, tokens) = queue.removeFirst()
             Response.success(
@@ -211,10 +364,7 @@ class CutAnswerRetryTest {
             )
         }
 
-        val result = service.chat(
-            provider = LLMProvider.ANTHROPIC, apiKey = "k", model = "claude", systemPrompt = "s", userPrompt = "u",
-            maxTokens = 2048
-        ).getOrThrow()
+        val result = ask(provider = LLMProvider.ANTHROPIC).getOrThrow()
 
         assertEquals("end_turn", result.content)
         assertEquals(listOf(2048, 4096), limits)
@@ -224,16 +374,98 @@ class CutAnswerRetryTest {
 
     @Test
     fun `the raised limit follows the desktop rule`() {
-        assertEquals(4096, LLMService.raisedLimit("length", 2048, 2048))
-        assertEquals(4096, LLMService.raisedLimit("max_tokens", 2048, 2048))
-        assertEquals("a count past the limit is a cut", 4096, LLMService.raisedLimit("length", 2049, 2048))
-        assertEquals(16384, LLMService.raisedLimit("length", 8192, 8192))
-        assertEquals("capped", 16384, LLMService.raisedLimit("length", 12000, 12000))
-        assertNull("no larger limit", LLMService.raisedLimit("length", 16384, 16384))
-        assertNull(LLMService.raisedLimit("stop", 2048, 2048))
-        assertNull(LLMService.raisedLimit(null, 2048, 2048))
-        assertNull("no count stated", LLMService.raisedLimit("length", 0, 2048))
-        assertNull(LLMService.raisedLimit("length", 0, 0))
+        assertEquals(4096, LLMService.raisedLimit(2048, 2048, null))
+        assertEquals("a count past the limit is a cut", 4096, LLMService.raisedLimit(2049, 2048, null))
+        assertEquals("no fixed cap", 32768, LLMService.raisedLimit(16384, 16384, null, attempt = 2))
+        assertEquals("capped by the room", 3000, LLMService.raisedLimit(2048, 2048, 3000))
+        assertNull("room spent", LLMService.raisedLimit(3000, 3000, 3000))
+        assertNull("three retries spent", LLMService.raisedLimit(16384, 16384, null, attempt = 3))
+        assertNull("stopped short", LLMService.raisedLimit(900, 2048, null))
+        assertNull("no count stated", LLMService.raisedLimit(0, 2048, null))
+        assertNull(LLMService.raisedLimit(0, 0, null))
+    }
+
+    @Test
+    fun `the model's stated maximum is read from each probed refusal`() {
+        assertEquals(
+            64000,
+            LLMService.statedOutputMaximum(
+                "max_tokens: 10000000 > 64000, which is the maximum allowed number of output tokens for claude-sonnet-4-5-20250929"
+            )
+        )
+        assertEquals(
+            128000,
+            LLMService.statedOutputMaximum(
+                "max_tokens is too large: 10000000. This model supports at most 128000 completion tokens, " +
+                    "whereas you provided 10000000."
+            )
+        )
+        assertEquals(
+            393216,
+            LLMService.statedOutputMaximum(
+                "Invalid max_tokens value, the valid range of max_tokens is [1, 393216] (request_id: abc)"
+            )
+        )
+        assertNull(
+            LLMService.statedOutputMaximum(
+                "Unsupported parameter: 'max_tokens' is not supported with this model. Use 'max_completion_tokens' instead."
+            )
+        )
+    }
+
+    // ==================== #831: timeouts scale with the limit ====================
+
+    @Test
+    fun `the timeout scale is one per 8192 tokens, rounded up`() {
+        assertEquals(1, LLMService.timeoutScale(0))
+        assertEquals(1, LLMService.timeoutScale(2048))
+        assertEquals(1, LLMService.timeoutScale(8192))
+        assertEquals(2, LLMService.timeoutScale(8193))
+        assertEquals(2, LLMService.timeoutScale(16384))
+        assertEquals(8, LLMService.timeoutScale(65536))
+    }
+
+    @Test
+    fun `an untagged request keeps the client's read timeout`() {
+        val chain = mockk<Interceptor.Chain>(relaxed = true)
+        every { chain.request() } returns Request.Builder().url("http://localhost/").build()
+
+        llmReadTimeoutInterceptor(120).intercept(chain)
+
+        verify(exactly = 0) { chain.withReadTimeout(any(), any()) }
+        verify { chain.proceed(any()) }
+    }
+
+    @Test
+    fun `a chat request's read timeout grows with its limit, and its tag is never sent`() = runBlocking {
+        val server = MockWebServer()
+        server.enqueue(MockResponse().setBody("""{"id":"x","choices":[]}"""))
+        server.start()
+        try {
+            var readTimeoutMillis = 0
+            val client = OkHttpClient.Builder()
+                .readTimeout(120, TimeUnit.SECONDS)
+                .addInterceptor(llmReadTimeoutInterceptor(120))
+                .addInterceptor { chain -> readTimeoutMillis = chain.readTimeoutMillis(); chain.proceed(chain.request()) }
+                .build()
+            val api = Retrofit.Builder()
+                .baseUrl(server.url("/"))
+                .client(client)
+                .addConverterFactory(AppModule.provideJson().asConverterFactory("application/json".toMediaType()))
+                .build()
+                .create(OpenAIApi::class.java)
+
+            api.chatCompletion(
+                server.url("/v1/chat/completions").toString(), "Bearer k",
+                OpenAIChatRequest(model = "m", messages = emptyList(), maxTokens = 16384), LLMOutputLimit(16384)
+            )
+
+            assertEquals(240_000, readTimeoutMillis)
+            val sent = server.takeRequest()
+            assertFalse(sent.headers.toString(), sent.headers.any { (_, value) -> value.contains("16384") })
+        } finally {
+            server.shutdown()
+        }
     }
 
     // ==================== #830: a cut answer with no text ====================
@@ -246,12 +478,6 @@ class CutAnswerRetryTest {
         )
     )
 
-    private fun assertCutBeforeWriting(result: Result<LLMResult>) {
-        val error = result.exceptionOrNull()
-        assertTrue("$error", error is LLMError.EmptyResponseError)
-        assertTrue(error!!.message!!, error.message!!.contains("before it wrote anything"))
-    }
-
     @Test
     fun `a reply's null content decodes`() {
         val body = """{"id":"x","choices":[{"index":0,"message":{"role":"assistant","content":null},""" +
@@ -263,7 +489,7 @@ class CutAnswerRetryTest {
     }
 
     @Test
-    fun `a textless cut answer is asked once more with twice the limit`() = runTest {
+    fun `a textless cut answer is asked again with twice the limit`() = runTest {
         openAIReplies(textless("length", 2048), answer("{\"score\": 4}", "stop", 2300))
 
         val result = ask().getOrThrow()
@@ -274,27 +500,35 @@ class CutAnswerRetryTest {
     }
 
     @Test
-    fun `a textless answer cut again fails, naming its limit`() = runTest {
-        openAIReplies(textless("length", 2048), textless("length", 4096))
+    fun `the connection test's textless cut answer fails, as on iOS`() = runTest {
+        openAIReplies(textless("length", 10))
 
-        assertCutBeforeWriting(ask())
-        assertEquals(listOf(2048, 4096), asked)
+        assertEquals(10, cutError(ask(maxTokens = 10, retryingCut = false)).maxTokens)
+        assertEquals("not asked again", listOf(10), asked)
     }
 
     @Test
-    fun `a textless cut answer whose retry fails fails`() = runTest {
-        openAIReplies(textless("length", 2048), Response.error(400, """{"error":{"message":"refused"}}""".toResponseBody()))
+    fun `a textless cut answer not asked again fails with the cut error, an empty quote`() = runTest {
+        openAIReplies(textless("length", 900))
 
-        assertCutBeforeWriting(ask())
+        val error = cutError(ask())
+
+        assertEquals(
+            "The answer from m reached its token limit (2048 tokens) and is incomplete. The answer as cut:\n\n",
+            error.message
+        )
+        assertEquals("", error.content)
+        assertEquals(listOf(2048), asked)
     }
 
     @Test
-    fun `a textless cut answer not asked again fails`() = runTest {
-        openAIReplies(textless("length", 900), textless("length", 10))
+    fun `the cut error names the tokens generated when the limit is unknown`() {
+        val error = LLMService.cutError("m", 0, LLMResult("x", 1, 700, "length", "m"))
 
-        assertCutBeforeWriting(ask())
-        assertCutBeforeWriting(ask(maxTokens = 10, retryingCut = false))
-        assertEquals(listOf(2048, 10), asked)
+        assertEquals(
+            "The answer from m reached its token limit (700 tokens generated) and is incomplete. The answer as cut:\n\nx",
+            error.message
+        )
     }
 
     @Test
@@ -316,7 +550,7 @@ class CutAnswerRetryTest {
                 Triple(listOf(AnthropicContentBlock(type = "text", text = "whole")), "end_turn", 3000)
             )
         )
-        coEvery { anthropicApi.createMessage(any(), any(), any(), any()) } answers {
+        coEvery { anthropicApi.createMessage(any(), any(), any(), any(), any()) } answers {
             limits += arg<AnthropicMessagesRequest>(3).maxTokens
             val (blocks, stop, tokens) = queue.removeFirst()
             Response.success(
@@ -327,10 +561,7 @@ class CutAnswerRetryTest {
             )
         }
 
-        val result = service.chat(
-            provider = LLMProvider.ANTHROPIC, apiKey = "k", model = "claude", systemPrompt = "s", userPrompt = "u",
-            maxTokens = 2048
-        ).getOrThrow()
+        val result = ask(provider = LLMProvider.ANTHROPIC).getOrThrow()
 
         assertEquals("whole", result.content)
         assertEquals(listOf(2048, 4096), limits)
@@ -351,7 +582,7 @@ class CutAnswerRetryTest {
         openAIReplies(textless("stop", 300))
         val heard = mutableListOf<Pair<Int, Int>>()
 
-        val failed = service.chat(LLMProvider.OPENAI, "k", "m", "s", "u", maxTokens = 2048, onUsage = { i, o -> heard += i to o })
+        val failed = ask(onUsage = { i, o -> heard += i to o })
 
         assertEquals(LLMError.EmptyResponseError(), failed.exceptionOrNull())
         assertEquals(listOf(100 to 300), heard)
@@ -359,7 +590,7 @@ class CutAnswerRetryTest {
 
     @Test
     fun `Anthropic's refusal is paid for, so onUsage hears it`() = runTest {
-        coEvery { anthropicApi.createMessage(any(), any(), any(), any()) } returns Response.success(
+        coEvery { anthropicApi.createMessage(any(), any(), any(), any(), any()) } returns Response.success(
             AnthropicMessagesResponse(
                 id = "msg", content = emptyList(), stopReason = "refusal",
                 usage = AnthropicUsage(inputTokens = 120, outputTokens = 3)
@@ -399,15 +630,22 @@ class CutAnswerRetryTest {
     // ==================== #818: each request's real tokens ====================
 
     @Test
-    fun `onUsage hears each request's own tokens, a retry's and a failed answer's too`() = runTest {
-        openAIReplies(answer("cut", "length", 2048), answer("whole", "stop", 2300), textless("length", 2048), textless("length", 4096))
+    fun `onUsage hears each request's own tokens, every retry's and a failed answer's too`() = runTest {
+        openAIReplies(
+            answer("cut", "length", 2048), answer("whole", "stop", 2300),
+            textless("length", 2048), textless("length", 4096), textless("length", 8192), textless("length", 16384)
+        )
         val heard = mutableListOf<Pair<Int, Int>>()
+        val sink: UsageSink = { i, o -> heard += i to o }
 
-        service.chat(LLMProvider.OPENAI, "k", "m", "s", "u", maxTokens = 2048, onUsage = { i, o -> heard += i to o })
-        val failed = service.chat(LLMProvider.OPENAI, "k", "m", "s", "u", maxTokens = 2048, onUsage = { i, o -> heard += i to o })
+        ask(onUsage = sink)
+        val failed = ask(onUsage = sink)
 
-        assertCutBeforeWriting(failed)
-        assertEquals(listOf(100 to 2048, 100 to 2300, 100 to 2048, 100 to 4096), heard)
+        cutError(failed)
+        assertEquals(
+            listOf(100 to 2048, 100 to 2300, 100 to 2048, 100 to 4096, 100 to 8192, 100 to 16384),
+            heard
+        )
     }
 
     @Test
@@ -425,5 +663,14 @@ class CutAnswerRetryTest {
         service.generateReport(p, "k", "m", "claim", listOf(LLMService.DocumentCitation("t", "passage")), onUsage = sink)
 
         assertEquals((1..5).map { 100 to it }, heard)
+    }
+
+    @Test
+    fun `a cut alternative-query answer is a failure, not an unusable answer`() = runTest {
+        openAIReplies(*(0..3).map { answer("[{\"concepts\": [", "length", 4096 shl it) }.toTypedArray())
+
+        val result = service.generateAlternativeQueries(LLMProvider.OPENAI, "k", "m", "claim", null, 0, 0)
+
+        assertTrue("got $result", result.exceptionOrNull() is LLMError.TruncatedResponseError)
     }
 }

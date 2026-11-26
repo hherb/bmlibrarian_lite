@@ -509,6 +509,31 @@ class FactCheckWorkflowSearchFailureTest {
     }
 
     @Test
+    fun `a cut alternative-query answer marks smart search as tried and says it was cut off (#831)`() = runTest {
+        holdSession(SearchProvider.PUBMED)
+        coEvery { documentRepository.getDocumentCount(SESSION_ID) } returns 0
+        pubMedFailsWith(429)
+        pubMedFinds("1") { it == "aspirin" }
+        coEvery { llmService.generateAlternativeQueries(any(), any(), any(), any(), any(), any(), any(), any(), any()) } returns
+            Result.failure(LLMError.TruncatedResponseError("cut", 32768, 32768, "[{\"concepts\": ["))
+
+        workflow.resumeSession(SESSION_ID, smartSearchConfig())
+
+        // Asked once here: chat already asked it again with larger limits
+        coVerify(exactly = 1) {
+            llmService.generateAlternativeQueries(any(), any(), any(), any(), any(), any(), any(), any(), any())
+        }
+        coVerify { sessionRepository.updateSmartSearchState(SESSION_ID, true, null, null) }
+        assertEquals(
+            "The model's answer was cut off at its length limit, so no alternative search was run. " +
+                "A model that writes out its reasoning first can use up that limit; another model, " +
+                "chosen in Settings, may help.",
+            workflow.searchFailureMessage.value
+        )
+        assertTrue("got ${workflow.state.value}", workflow.state.value is WorkflowState.Completed)
+    }
+
+    @Test
     fun `more evidence whose alternative-query answers never hold a usable query keeps the report and says why`() = runTest {
         holdSession(SearchProvider.PUBMED)
         stored = stored.copy(workflowStep = WorkflowStep.COMPLETED)

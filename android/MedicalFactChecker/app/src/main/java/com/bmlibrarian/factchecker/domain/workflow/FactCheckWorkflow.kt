@@ -157,6 +157,12 @@ class FactCheckWorkflow @Inject constructor(
             "The model declined to propose alternative search queries, so no alternative search was run. " +
                 "Another model, chosen in Settings, may answer."
 
+        /** Shown when the model's answer for alternative queries was still cut at its limit (the desktop's wording, #831). */
+        private const val SMART_SEARCH_CUT_OFF_MESSAGE =
+            "The model's answer was cut off at its length limit, so no alternative search was run. " +
+                "A model that writes out its reasoning first can use up that limit; another model, " +
+                "chosen in Settings, may help."
+
         /** Shown when a request for more evidence ran alternative queries that found no new documents. */
         const val NO_NEW_EVIDENCE_NOTICE =
             "The alternative searches found no documents beyond those already found. The report is unchanged."
@@ -569,6 +575,10 @@ class FactCheckWorkflow @Inject constructor(
                     }
                     SmartSearchOutcome.Refused -> {
                         keepReportAfterFailedSearchForMore(session, SMART_SEARCH_REFUSED_MESSAGE)
+                        return
+                    }
+                    SmartSearchOutcome.CutOff -> {
+                        keepReportAfterFailedSearchForMore(session, SMART_SEARCH_CUT_OFF_MESSAGE)
                         return
                     }
                     is SmartSearchOutcome.Ran -> outcome
@@ -1345,6 +1355,7 @@ class FactCheckWorkflow @Inject constructor(
                     SmartSearchOutcome.Unavailable -> _searchFailureMessage.value = SMART_SEARCH_UNAVAILABLE_MESSAGE
                     SmartSearchOutcome.Unusable -> _searchFailureMessage.value = SMART_SEARCH_UNUSABLE_MESSAGE
                     SmartSearchOutcome.Refused -> _searchFailureMessage.value = SMART_SEARCH_REFUSED_MESSAGE
+                    SmartSearchOutcome.CutOff -> _searchFailureMessage.value = SMART_SEARCH_CUT_OFF_MESSAGE
                     is SmartSearchOutcome.Ran -> recordShortfalls(session.id, smartSearch.unrecordedShortfalls)
                 }
                 // Re-check after smart search
@@ -2350,6 +2361,9 @@ class FactCheckWorkflow @Inject constructor(
         /** The model declined to propose alternative queries (#819); smart search is marked as tried. */
         data object Refused : SmartSearchOutcome
 
+        /** The model's answer was still cut at its limit after its retries (#831); none of it is searched, and smart search is marked as tried. */
+        data object CutOff : SmartSearchOutcome
+
         /**
          * The alternative queries ran.
          *
@@ -2404,6 +2418,12 @@ class FactCheckWorkflow @Inject constructor(
                 Log.w(TAG, "Smart search's alternative queries were refused")
                 markTried()
                 return SmartSearchOutcome.Refused
+            }
+            if (error is LLMError.TruncatedResponseError) {
+                // Answered and paid for, its retries with larger limits included
+                Log.w(TAG, "Smart search's alternative queries were cut off at their length limit")
+                markTried()
+                return SmartSearchOutcome.CutOff
             }
             // Not marked as tried, so smart search can be tried again
             Log.e(TAG, "Smart search could not ask for alternative queries (${error.javaClass.simpleName})")
@@ -2513,8 +2533,9 @@ class FactCheckWorkflow @Inject constructor(
      * @param triedQueries The alternative queries earlier rounds ran, each as its
      *   concept names joined by " AND "
      * @return The queries; an empty list when every answer, retries included, held
-     *   none; or a failure when the model could not be asked, or declined to answer
-     *   ([LLMError.RefusedError])
+     *   none; or a failure when the model could not be asked, declined to answer
+     *   ([LLMError.RefusedError]) or answered cut at its limit, its retries
+     *   included ([LLMError.TruncatedResponseError], not asked again here)
      */
     private suspend fun requestAlternativeQueries(
         session: SessionEntity,

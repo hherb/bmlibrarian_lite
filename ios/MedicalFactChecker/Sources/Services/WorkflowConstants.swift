@@ -42,12 +42,24 @@ enum WorkflowConstants {
     /// Most output tokens for a report.
     static let reportMaxTokens = 8192
 
-    /// What a cut answer's limit is multiplied by when it is asked once more
-    /// (#822, the desktop's #825): how long a model thinks varies from run to run.
+    /// What a cut answer's limit is multiplied by each time it is asked again
+    /// (#822, #831, the desktop's #825): how long a model thinks varies from run to run.
     static let cutAnswerRetryFactor = 2
 
-    /// The most output tokens a cut answer is asked again with, as on the desktop.
-    static let cutAnswerRetryMaxTokens = 16384
+    /// How many times a cut answer is asked again, each with twice the last
+    /// limit (#831, the desktop's `CUT_ANSWER_MAX_RETRIES`): it bounds the cost
+    /// of a model stuck repeating itself. The model's own maximum is the only
+    /// other ceiling.
+    static let cutAnswerMaxRetries = 3
+
+    /// What a cut answer's error puts before the answer it quotes, as the
+    /// desktop's `CUT_ANSWER_QUOTE_HEADING`.
+    static let cutAnswerQuoteHeading = "The answer as cut:"
+
+    /// The limit the base timeouts are sized for (the report's, the largest
+    /// first request); a request asking more waits that many times longer
+    /// (#831), since a non-streamed answer arrives only when it is whole.
+    static let timeoutBaseTokens = 8192
 
     // MARK: - Smart Search
 

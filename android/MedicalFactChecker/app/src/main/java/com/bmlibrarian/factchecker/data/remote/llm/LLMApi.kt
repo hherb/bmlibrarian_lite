@@ -18,12 +18,39 @@
 
 package com.bmlibrarian.factchecker.data.remote.llm
 
+import okhttp3.Interceptor
 import retrofit2.Response
 import retrofit2.http.Body
 import retrofit2.http.GET
 import retrofit2.http.Header
 import retrofit2.http.POST
+import retrofit2.http.Tag
 import retrofit2.http.Url
+import java.util.concurrent.TimeUnit
+
+/**
+ * The output limit a chat request asks, carried as the request's OkHttp tag (never
+ * sent to the provider), so [llmReadTimeoutInterceptor] can size its read timeout (#831).
+ *
+ * @property maxTokens The request's output token limit
+ */
+data class LLMOutputLimit(val maxTokens: Int)
+
+/**
+ * An application interceptor giving each request tagged with an [LLMOutputLimit]
+ * a read timeout [LLMService.timeoutScale] times [baseSeconds]: an answer asked
+ * with eight times the limit can take minutes (#831). Untagged requests keep the
+ * client's timeout.
+ *
+ * @param baseSeconds The read timeout for a limit up to [com.bmlibrarian.factchecker.util.Constants.LLM_TIMEOUT_BASE_TOKENS]
+ * @return The interceptor
+ */
+fun llmReadTimeoutInterceptor(baseSeconds: Long): Interceptor = Interceptor { chain ->
+    val limit = chain.request().tag(LLMOutputLimit::class.java)
+        ?: return@Interceptor chain.proceed(chain.request())
+    val seconds = baseSeconds * LLMService.timeoutScale(limit.maxTokens)
+    chain.withReadTimeout(seconds.toInt(), TimeUnit.SECONDS).proceed(chain.request())
+}
 
 /**
  * Retrofit interface for OpenAI-compatible LLM APIs.
@@ -39,13 +66,15 @@ interface OpenAIApi {
      * @param url Full URL for chat/completions endpoint
      * @param authorization Bearer token authorization header
      * @param request Chat completion request body
+     * @param limit The request's output limit, for its read timeout (not sent)
      * @return Chat completion response
      */
     @POST
     suspend fun chatCompletion(
         @Url url: String,
         @Header("Authorization") authorization: String,
-        @Body request: OpenAIChatRequest
+        @Body request: OpenAIChatRequest,
+        @Tag limit: LLMOutputLimit
     ): Response<OpenAIChatResponse>
 
     /**
@@ -77,6 +106,7 @@ interface AnthropicApi {
      * @param apiKey API key via x-api-key header
      * @param anthropicVersion API version header (required by Anthropic)
      * @param request Messages request body
+     * @param limit The request's output limit, for its read timeout (not sent)
      * @return Messages response
      */
     @POST
@@ -84,7 +114,8 @@ interface AnthropicApi {
         @Url url: String,
         @Header("x-api-key") apiKey: String,
         @Header("anthropic-version") anthropicVersion: String,
-        @Body request: AnthropicMessagesRequest
+        @Body request: AnthropicMessagesRequest,
+        @Tag limit: LLMOutputLimit
     ): Response<AnthropicMessagesResponse>
 
     /**
@@ -120,12 +151,14 @@ interface OllamaApi {
      *
      * @param url Full URL for the chat endpoint (e.g., http://localhost:11434/api/chat)
      * @param request Chat request body, with its `num_ctx`
+     * @param limit The request's output limit, for its read timeout (not sent)
      * @return Chat reply
      */
     @POST
     suspend fun chat(
         @Url url: String,
-        @Body request: OllamaChatRequest
+        @Body request: OllamaChatRequest,
+        @Tag limit: LLMOutputLimit
     ): Response<OllamaChatResponse>
 
     /**
