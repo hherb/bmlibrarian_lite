@@ -15,9 +15,8 @@ The rules are the apps' (iOS/macOS's ``executeSmartSearch``) and the
   paid call; the apps search a repeat again, the desktop never does. A
   request that failed, an answer the model declined, or an answer cut off at
   its token limit (asked again, it is likely cut off again, each time paid),
-  stops the round; the complete queries a cut-off answer held before the
-  limit (those not already run) are still searched. None of these is a source's failure, so none
-  records a shortfall.
+  stops the round; no query of an answer still cut is searched (#831). None
+  of these is a source's failure, so none records a shortfall.
 - Each query is searched with the configured provider. Once the round ends,
   a query is kept as run unless a source could not answer it and it found
   nothing new: a later round may ask it again. Kept at the end, so a round
@@ -73,10 +72,10 @@ CUT_OFF_ADVICE_TEXT = (
     "A model that writes out its reasoning first can use up that limit; "
     "another Query Conversion model in Settings may help."
 )
-#: Still cut after its retries with larger limits, no part of the answer is searched (#831)
+#: Still cut after any retries with larger limits, no part of the answer is searched (#831)
 ANSWER_CUT_OFF_TEXT = (
-    "The model's answer was cut off at its length limit, even when asked again "
-    f"with larger limits, so no alternative search was run. {CUT_OFF_ADVICE_TEXT}"
+    "The model's answer was cut off at its length limit, so no alternative "
+    f"search was run. {CUT_OFF_ADVICE_TEXT}"
 )
 #: Put before ANSWER_CUT_OFF_TEXT when an earlier answer held only repeats
 EARLIER_REPEATS_TEXT = "Earlier, the model proposed only alternative search queries already run."

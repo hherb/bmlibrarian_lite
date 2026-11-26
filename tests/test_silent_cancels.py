@@ -57,6 +57,7 @@ from bmlibrarian_lite.exceptions import (  # noqa: E402
     APIError,
     RefusedResponseError,
     RetryExhaustedError,
+    TruncatedResponseError,
 )
 from bmlibrarian_lite.gui import workers as workers_module  # noqa: E402
 from bmlibrarian_lite.gui.workers import (  # noqa: E402
@@ -243,6 +244,26 @@ class TestAWorkerThatCannotBeCancelled:
             "error",
             ("The model m declined to answer. Another model may answer what this one declined.",),
         )
+
+    def test_a_cut_answer_says_what_to_do_before_its_quote(self) -> None:
+        """#831: the advice is never read as the model's last words, nor inside its open fence."""
+        agent = MagicMock()
+        agent.ask.side_effect = TruncatedResponseError(
+            "The answer reached its token limit (8 tokens) and is incomplete. "
+            "The answer as cut:\n\nDoses:\n```\n75 mg",
+            content="Doses:\n```\n75 mg",
+        )
+        worker = AnswerWorker(agent=agent, question="Does aspirin help?")
+        recorder = Recorder(worker)
+
+        worker.run()
+
+        kind, (message,) = recorder.only()
+        head, _, quoted = message.partition("The answer as cut:")
+        assert kind == "error"
+        assert head.startswith("The answer reached its token limit (8 tokens) and is incomplete. ")
+        assert head.rstrip() != "The answer reached its token limit (8 tokens) and is incomplete."
+        assert quoted == "\n\nDoses:\n```\n75 mg"
 
     def test_an_answer_is_still_an_answer(self) -> None:
         """The control on the ordinary path."""

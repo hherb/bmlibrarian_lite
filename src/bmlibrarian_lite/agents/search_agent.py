@@ -165,8 +165,8 @@ class LiteSearchAgent(LiteBaseAgent):
     def convert_ask(self, prompt: str) -> str:
         """The question's own query: one JSON answer from the query-conversion model.
 
-        Through ``_chat``, so a cut answer is asked once more with a larger
-        limit and recorded, and one still cut raises instead of being parsed
+        Through ``_chat``, so a cut answer is asked again with larger limits
+        and recorded (#831), and one still cut raises instead of being parsed
         as complete (#827).
 
         Args:

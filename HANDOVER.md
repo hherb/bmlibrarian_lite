@@ -173,8 +173,8 @@ a git pin). Snapshot rows keep `run_status`/`run_deciding` set-once.
   false) included; a request stating none records no row.
 - **A cut answer is asked again with a larger limit** (desktop #825/#831,
   apps #822): only one that generated its whole limit; each retry one attempt,
-  never backed off; usage is every request's. **Desktop (#831, PR on
-  `fix/cut-answer-three-retries-831`):** three retries (2×, 4×, 8×), capped
+  never backed off; usage is every request's. **Desktop (#831, PR #838):**
+  three retries (2×, 4×, 8×), capped
   only by the model: Anthropic's 400 `max_tokens: N > M, which is the maximum
   allowed…` (probed 2026-11-26: 128000 on Haiku/Sonnet 5.5) is
   `OutputLimitExceededError`, then asked within M; past 8192 it streams; Ollama

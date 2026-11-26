@@ -14,7 +14,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from bmlibrarian_lite import cut_answers
+from bmlibrarian_lite import cut_answers, cut_answers_store
 from bmlibrarian_lite.agents.base import LiteBaseAgent
 from bmlibrarian_lite.agents.search_agent import LiteSearchAgent
 from bmlibrarian_lite.config import LiteConfig
@@ -59,7 +59,8 @@ class Client:
         """Answer one call."""
         self.limits.append(max_tokens)
         self.calls.append({"messages": messages, "model": model, **kwargs})
-        assert len(self.limits) <= len(self._responses), "More calls than scripted"
+        if len(self.limits) > len(self._responses):
+            pytest.fail("More calls than scripted")  # a BaseException: no retry loop swallows it
         answer = self._responses[len(self.limits) - 1]
         if isinstance(answer, Exception):
             raise answer
@@ -161,13 +162,16 @@ class TestTheAgentAsksAgain:
         ]
         assert all(f"loop {n}" in caplog.text for n in limits), "every cut answer is logged with its text"
 
-    def test_a_refused_limit_is_asked_again_at_the_stated_maximum(self, recorded: list[CutAnswer]) -> None:
+    def test_a_refused_limit_is_asked_again_at_the_stated_maximum(
+        self, recorded: list[CutAnswer], caplog: pytest.LogCaptureFixture
+    ) -> None:
         """The refused request is no attempt; the maximum caps that retry and every later one."""
         client = Client(cut("a", LIMIT, LIMIT), refused(3000), cut("ab", 3000, 3000))
 
         with pytest.raises(TruncatedResponseError):
             agent_on(client)._chat(MESSAGES)
         assert client.limits == [LIMIT, 2 * LIMIT, 3000]
+        assert caplog.text.count("The answer as cut:\na\n") == 1, "the same cut answer is logged once"
         assert [(r.attempt, r.max_tokens, r.retry_max_tokens, r.retry_cut) for r in recorded] == [
             (0, LIMIT, 3000, True), (1, 3000, None, None),
         ]
@@ -212,17 +216,45 @@ class TestTheAgentAsksAgain:
     def test_a_failed_retry_fails_with_the_cut_answer(
         self, method: str, recorded: list[CutAnswer], caplog: pytest.LogCaptureFixture
     ) -> None:
-        """One attempt, never backed off: the cut answer before it is refused with its text."""
-        client = Client(cut("x", LIMIT, LIMIT), ConnectionError("down"))
+        """One attempt, never backed off: the cut answer before it fails, naming the retry's failure."""
+        down = ConnectionError("down: https://api.example?api_key=sk-secret")
+        client = Client(cut("x", LIMIT, LIMIT), down)
 
         with pytest.raises(TruncatedResponseError) as raised:
             getattr(agent_on(client), method)(MESSAGES)
         assert raised.value.content == "x"
+        assert raised.value.__cause__ is down
+        message = str(raised.value)
+        assert f"asking again with {2 * LIMIT} tokens failed (ConnectionError: down" in message
+        assert message.endswith("The answer as cut:\n\nx")
+        assert "sk-secret" not in message and "sk-secret" not in caplog.text
         assert client.limits == [LIMIT, 2 * LIMIT]
-        assert "keeping the cut answer" in caplog.text
         assert (recorded[0].retry_max_tokens, recorded[0].retry_output_tokens, recorded[0].retry_cut) == (
             2 * LIMIT, None, None
         )
+
+    def test_a_retry_failing_late_in_the_chain_fails_with_the_latest_cut(self, recorded: list[CutAnswer]) -> None:
+        """The answer before the failed request is the one quoted, not the first."""
+        client = Client(cut("a", LIMIT, LIMIT), cut("ab", 2 * LIMIT, 2 * LIMIT), ConnectionError("down"))
+
+        with pytest.raises(TruncatedResponseError) as raised:
+            agent_on(client)._chat(MESSAGES)
+        assert raised.value.content == "ab"
+        assert client.limits == [LIMIT, 2 * LIMIT, 4 * LIMIT]
+        assert [(r.attempt, r.retry_max_tokens, r.retry_cut) for r in recorded] == [
+            (0, 2 * LIMIT, True), (1, 4 * LIMIT, None),
+        ]
+
+    def test_a_cut_retry_with_no_known_limit_is_not_asked_again(self, recorded: list[CutAnswer]) -> None:
+        """A retry that does not say what limit it was asked with fails as cut, never asked again."""
+        client = Client(
+            cut("a", LIMIT, LIMIT),
+            LLMResponse(content="ab", output_tokens=2 * LIMIT, stop_reason=STOP_REASON_MAX_TOKENS),
+        )
+
+        with pytest.raises(TruncatedResponseError):
+            agent_on(client)._chat(MESSAGES)
+        assert client.limits == [LIMIT, 2 * LIMIT]
 
     def test_a_cut_answer_with_no_text_is_asked_again(self, recorded: list[CutAnswer]) -> None:
         """Thinking took the whole limit (#830): a cut like any other."""
@@ -262,6 +294,17 @@ class TestTheAgentAsksAgain:
         assert agent._expand_query("Q?") == ["Q?", "one", "two", "three"]
         assert client.limits == [2048, 4096]
 
+    def test_a_failed_expansion_request_is_no_missing_query(self) -> None:
+        """Only a declined or still-cut answer falls back to the question; a failure surfaces."""
+        from bmlibrarian_lite.agents.interrogation_agent import LiteInterrogationAgent
+
+        agent = LiteInterrogationAgent.__new__(LiteInterrogationAgent)
+        agent.config = LiteConfig()
+        agent._llm_client = Client(ConnectionError("down"))  # type: ignore[assignment]
+
+        with pytest.raises(ConnectionError):
+            agent._expand_query("Q?")
+
 
 class TestOllama:
     """A larger ``num_predict`` must fit the context window beside the prompt."""
@@ -281,6 +324,15 @@ class TestOllama:
 
         assert agent_on(client, provider="ollama", context_window=8192)._chat(MESSAGES) == "done"
         assert client.limits == [LIMIT, 8192 - 5000]
+
+    def test_a_retry_cut_at_the_room_is_not_asked_again(self, recorded: list[CutAnswer]) -> None:
+        """The room caps a later retry; one cut there is not sent again at the same ``num_predict``."""
+        client = Client(cut("a", LIMIT, LIMIT), cut("ab", 2 * LIMIT, 2 * LIMIT), cut("abc", 4900, 4900))
+
+        with pytest.raises(TruncatedResponseError):
+            agent_on(client, provider="ollama", context_window=5000)._chat(MESSAGES)
+        assert client.limits == [LIMIT, 2 * LIMIT, 5000 - 100]
+        assert recorded[-1].retry_max_tokens is None
 
 
 class TestTheRecord:
@@ -321,6 +373,22 @@ class TestTheRecord:
         storage.record_cut_answer(CutAnswer("scoring", "anthropic:m", 4096, 4096, cut_at="t1", attempt=1))
 
         assert [r.attempt for r in storage.cut_answers()] == [0, 1]
+
+    def test_a_column_another_process_added_first_is_kept(self) -> None:
+        """Two processes opening an old database at once: the second's ALTER is no failure."""
+        conn = sqlite3.connect(":memory:")
+        cut_answers_store.create(conn)
+
+        class BeforeTheOtherProcess:
+            """The connection as it read the table before the other process altered it."""
+
+            def executescript(self, script: str) -> Any:
+                return conn.executescript(script)
+
+            def execute(self, sql: str) -> Any:
+                return iter(()) if sql.startswith("PRAGMA") else conn.execute(sql)
+
+        cut_answers_store.create(BeforeTheOtherProcess())  # type: ignore[arg-type]
 
     def test_the_app_records_through_its_storage(self, tmp_path: Any) -> None:
         """The recorder the app sets writes the agent's cut to SQLite."""

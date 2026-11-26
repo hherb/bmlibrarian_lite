@@ -101,7 +101,7 @@ class TestTheBaseAgent:
             agent._chat(MESSAGES)
 
     def test_chat_keeps_what_a_cut_off_answer_wrote_on_the_error(self) -> None:
-        """A caller that can use its complete parts gets them (#631 item 2)."""
+        """Kept on the error for the log and the reader, never read as the answer (#831)."""
         agent = LiteBaseAgent.__new__(LiteBaseAgent)
         agent._chat_response = answers(cut_off('[{"a": 1}, {"b"'))  # type: ignore[method-assign]
 
@@ -109,8 +109,8 @@ class TestTheBaseAgent:
             agent._chat(MESSAGES)
         assert raised.value.content == '[{"a": 1}, {"b"'
 
-    def test_chat_prose_keeps_what_an_answer_with_no_prose_wrote(self) -> None:
-        """Unclosed reasoning is no prose, but it is what the model wrote."""
+    def test_chat_prose_keeps_unclosed_reasoning_on_the_error(self) -> None:
+        """Reasoning cut before it closed is what the model wrote, kept as written."""
         agent = LiteBaseAgent.__new__(LiteBaseAgent)
         agent._chat_response = answers(cut_off("<think>\nThe user"))  # type: ignore[method-assign]
 

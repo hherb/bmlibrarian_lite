@@ -52,6 +52,7 @@ from PySide6.QtCore import QThread, Signal, SignalInstance
 from PySide6.QtWidgets import QWidget
 
 from ..analysis_failures import advice_for_causes, failure_cause_text, redact_secrets
+from ..constants import CUT_ANSWER_QUOTE_HEADING
 from ..data_models import (
     EvaluationErrorCode,
     LookupRecord,
@@ -351,7 +352,13 @@ class AnswerWorker(SingleOutcome, QThread):
             logger.exception("Answer generation error")
             message = redact_secrets(str(e))
             if isinstance(e, (TruncatedResponseError, RefusedResponseError)):
-                message += f". {advice_for_causes([classify_llm_exception(e)])}"
+                # the advice goes before a cut answer's quote, never after the model's words (#831)
+                head, heading, quoted = message.partition(CUT_ANSWER_QUOTE_HEADING)
+                advice = advice_for_causes([classify_llm_exception(e)])
+                message = (
+                    f"{head.rstrip()} {advice}\n\n{heading}{quoted}" if heading
+                    else f"{message}. {advice}"
+                )
             self._end(self.error, message)
             return
         self._end(self.finished, answer, sources)

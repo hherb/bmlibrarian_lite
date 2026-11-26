@@ -258,12 +258,17 @@ class AnthropicProvider(BaseProvider):
                 Claude Opus 4.7 and later refuse it, so Claude samples at the
                 API's defaults (#758, bmlib#705). Kept for the shared
                 provider signature.
-            max_tokens: Maximum tokens in the response.
+            max_tokens: Maximum tokens in the response. Past
+                ``ANTHROPIC_NONSTREAMING_MAX_TOKENS`` the request streams.
             **kwargs: Additional parameters: ``json_mode``; ``top_p`` is not
                 sent, for the reason ``temperature`` is not.
 
         Returns:
             LLMResponse with Claude's response.
+
+        Raises:
+            OutputLimitExceededError: A 400 stating the model's maximum output,
+                which ``max_tokens`` exceeds (#831).
         """
         model = current_anthropic_model(model or self.default_model)
         client: Any = self._get_client()  # the SDK is imported lazily

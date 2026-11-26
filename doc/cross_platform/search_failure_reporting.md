@@ -400,7 +400,7 @@ ways:
 - An answer cut off at its token limit (Anthropic's `max_tokens` or
   `model_context_window_exceeded`, Ollama's `done_reason` `length`, or, from
   a server that sends no `done_reason`, an answer of the whole `num_predict`)
-  and still cut after its retries with larger limits (#825, #831) is not
+  and still cut after any retries with larger limits (#825, #831) is not
   asked for again, since the same limit likely cuts it off again, each time
   paid. None of its queries is searched, not even the complete ones (#831;
   before, they were): the user is told the answer was cut off, and that an

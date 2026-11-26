@@ -30,6 +30,7 @@ from ..constants import SHORT_ANSWER_MAX_TOKENS
 from ..data_models import LiteChunk
 from ..chunking import chunk_document_for_interrogation
 from ..embeddings import LiteEmbedder
+from ..exceptions import RefusedResponseError, TruncatedResponseError
 from .base import LiteBaseAgent
 
 logger = logging.getLogger(__name__)
@@ -198,8 +199,8 @@ class LiteInterrogationAgent(LiteBaseAgent):
             # Return original + alternatives
             return [question] + alternatives[:3]
 
-        except Exception as e:
-            logger.warning(f"Query expansion failed: {e}")
+        except (TruncatedResponseError, RefusedResponseError) as e:
+            logger.warning(f"Query expansion gave no query ({type(e).__name__}); searching the question alone")
             return [question]
 
     def ask(

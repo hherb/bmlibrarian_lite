@@ -33,7 +33,9 @@ from bmlib.llm.utils import strict_json_loads
 from bmlibrarian_lite.llm import LLMClient, LLMMessage, LLMResponse
 from bmlibrarian_lite.llm.client import PROVIDER_OLLAMA
 from .. import cut_answers
+from ..analysis_failures import redact_secrets
 from ..config import LiteConfig, TaskModelConfig
+from ..constants import CUT_ANSWER_QUOTE_HEADING
 from ..exceptions import OutputLimitExceededError, RefusedResponseError, TruncatedResponseError
 from ..utils import json_correction_due
 from ..llm.data_types import STOP_REASON_MAX_TOKENS, STOP_REASON_REFUSAL
@@ -113,16 +115,29 @@ def _answer_text(response: LLMResponse) -> str:
     if response.stop_reason == STOP_REASON_REFUSAL:
         raise RefusedResponseError(f"The model {response.model} declined to answer")
     if response.stop_reason == STOP_REASON_MAX_TOKENS:
-        limit = (
-            f"{response.max_tokens} tokens" if response.max_tokens
-            else f"{response.output_tokens} tokens generated"
-        )
-        raise TruncatedResponseError(
-            f"The answer from {response.model} reached its token limit ({limit}) and is "
-            f"incomplete. The answer as cut:\n\n{response.content}",
-            content=response.content,
-        )
+        raise _cut_error(response)
     return response.content
+
+
+def _cut_error(response: LLMResponse, after: str = "") -> TruncatedResponseError:
+    """The error for an answer cut at its token limit, quoting the answer (#831).
+
+    Args:
+        response: The cut answer.
+        after: What happened after it, such as a retry that failed.
+
+    Returns:
+        The error, carrying the cut answer as its ``content``.
+    """
+    limit = (
+        f"{response.max_tokens} tokens" if response.max_tokens
+        else f"{response.output_tokens} tokens generated"
+    )
+    return TruncatedResponseError(
+        f"The answer from {response.model} reached its token limit ({limit}) and is "
+        f"incomplete{after}. {CUT_ANSWER_QUOTE_HEADING}\n\n{response.content}",
+        content=response.content,
+    )
 
 
 class LiteBaseAgent:
@@ -291,8 +306,10 @@ class LiteBaseAgent:
         :data:`CUT_ANSWER_MAX_RETRIES` times; the last answer is returned, cut
         or not. Each retry is one request, never backed off. A provider
         refusing a limit past the model's maximum is asked once with that
-        maximum, the last retry. A retry that raises (a timeout, an outage) is
-        logged and the cut answer before it returned. One that stopped short
+        maximum, the last retry; the refused request is not counted. A retry
+        that raises (a timeout, an outage) raises the cut answer's
+        :class:`TruncatedResponseError`, naming that failure, so no caller
+        re-sends it as transient. One that stopped short
         of its limit is not asked again: the context window ran out, and a
         larger limit does not change that. On Ollama a retry must fit the
         configured ``context_window`` beside the prompt (as the reported
@@ -309,6 +326,10 @@ class LiteBaseAgent:
 
         Returns:
             The last answer: the first, or the last retry that answered
+
+        Raises:
+            TruncatedResponseError: A retry failed; it quotes the cut answer
+                before it and names the failure.
         """
         response = self._chat_response(messages, task_id, temperature, max_tokens, json_mode)
         if response.stop_reason != STOP_REASON_MAX_TOKENS or response.max_tokens is None:
@@ -320,6 +341,7 @@ class LiteBaseAgent:
             room = window - response.input_tokens if window else 0
         task, model = task_id or self.TASK_ID, self._get_model(task_id)
         attempt = 0
+        text_logged = False  # a refused limit asks the same attempt again
         while True:
             assert response.max_tokens is not None  # every answer here was asked with one
             cut = cut_answers.CutAnswer(
@@ -332,8 +354,8 @@ class LiteBaseAgent:
             logger.warning(
                 f"The answer from {model} reached its token limit ({cut.max_tokens}; "
                 f"{cut.output_tokens} tokens generated, attempt {attempt}); "
-                f"{f'asking again with {cut.retry_max_tokens}' if cut.retry_max_tokens else 'not asked again'}. "
-                f"The answer as cut:\n{response.content}"
+                f"{f'asking again with {cut.retry_max_tokens}' if cut.retry_max_tokens else 'not asked again'}."
+                + ("" if text_logged else f" {CUT_ANSWER_QUOTE_HEADING}\n{response.content}")
             )
             if cut.retry_max_tokens is None:
                 cut_answers.record(cut)
@@ -346,21 +368,22 @@ class LiteBaseAgent:
                 if isinstance(e, OutputLimitExceededError) and e.maximum < cut.retry_max_tokens:
                     logger.warning(f"{e}; asking within it")
                     room = e.maximum  # caps this retry and every later one
+                    text_logged = True
                     continue
-                # the cut answer is still an answer: its caller decides
-                logger.warning(
-                    f"Asking {model} again with {cut.retry_max_tokens} failed "
-                    f"({type(e).__name__}: {e}); keeping the cut answer"
-                )
                 cut_answers.record(cut)
-                return response
+                # still a cut, never retried as transient: a retry is one request (#831)
+                failure = f"{type(e).__name__}: {redact_secrets(str(e))}"
+                logger.warning(f"Asking {model} again with {cut.retry_max_tokens} failed ({failure})")
+                raise _cut_error(
+                    response, f"; asking again with {cut.retry_max_tokens} tokens failed ({failure})"
+                ) from e
             retry_cut = retry.stop_reason == STOP_REASON_MAX_TOKENS
             cut_answers.record(
                 dataclasses.replace(cut, retry_output_tokens=retry.output_tokens, retry_cut=retry_cut)
             )
             if not retry_cut or retry.max_tokens is None:
                 return retry
-            response, attempt = retry, attempt + 1
+            response, attempt, text_logged = retry, attempt + 1, False
 
     def _chat_response(
         self,

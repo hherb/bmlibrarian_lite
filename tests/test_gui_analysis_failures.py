@@ -629,6 +629,24 @@ class TestTheDialogNamesTheStage:
         [call] = module.QMessageBox.warning.call_args_list
         assert call.args[1] == title
 
+    def test_a_still_cut_report_quotes_its_answer_in_the_details(
+        self, qapp: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+    ) -> None:
+        """A cut report can run to tens of thousands of words: the dialog's text stays the error (#831)."""
+        from bmlibrarian_lite.gui import systematic_review_tab as module
+
+        tab = review_tab(monkeypatch, tmp_path)
+
+        tab._on_error("report", "The answer reached its token limit.\n\nThe answer as cut:\n\n# Report\nAspirin")
+
+        module.QMessageBox.warning.assert_not_called()
+        assert module.QMessageBox.call_args.args[1:3] == (
+            "Report Generation Failed", "The answer reached its token limit."
+        )
+        box = module.QMessageBox.return_value
+        box.setDetailedText.assert_called_once_with("The answer as cut:\n\n# Report\nAspirin")
+        box.exec.assert_called_once()
+
     def test_a_step_that_does_not_end_the_review_gets_no_dialog(
         self, qapp: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Any
     ) -> None:

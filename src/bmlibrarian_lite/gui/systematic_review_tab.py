@@ -61,7 +61,7 @@ from ..audit_records import (
     checkpoint_metadata_with_retraction_snapshot,
 )
 from ..config import LiteConfig
-from ..constants import KEPT_THREAD_EXIT_WAIT_MS, SMART_SEARCH_THRESHOLD
+from ..constants import CUT_ANSWER_QUOTE_HEADING, KEPT_THREAD_EXIT_WAIT_MS, SMART_SEARCH_THRESHOLD
 from ..storage import LiteStorage
 from ..data_models import (
     TransparencyAnalysisFailure,
@@ -1615,7 +1615,14 @@ class SystematicReviewTab(QWidget):
         if title:
             first_line = message.partition("\n")[0]
             self.progress_label.setText(f"Error in {step}: {first_line}")
-            QMessageBox.warning(self, title, message)
+            text, heading, quoted = message.partition(CUT_ANSWER_QUOTE_HEADING)
+            if not heading:
+                QMessageBox.warning(self, title, message)
+                return
+            # a still-cut answer's quote can run to tens of thousands of words (#831)
+            box = QMessageBox(QMessageBox.Icon.Warning, title, text.rstrip(), parent=self)
+            box.setDetailedText(heading + quoted)
+            box.exec()
         else:
             self.progress_label.setText(f"Error in {step}: {message}")
 

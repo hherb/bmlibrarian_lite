@@ -52,7 +52,12 @@ def create(conn: sqlite3.Connection) -> None:
     """
     conn.executescript(SCHEMA)
     if "attempt" not in {row[1] for row in conn.execute(f"PRAGMA table_info({TABLE})")}:
-        conn.execute(f"ALTER TABLE {TABLE} ADD COLUMN attempt INTEGER NOT NULL DEFAULT 0")
+        try:
+            conn.execute(f"ALTER TABLE {TABLE} ADD COLUMN attempt INTEGER NOT NULL DEFAULT 0")
+        except sqlite3.OperationalError as e:
+            # another process opening the same database added it first
+            if "duplicate column" not in str(e):
+                raise
 
 _COLUMNS = [f.name for f in fields(CutAnswer)]
 

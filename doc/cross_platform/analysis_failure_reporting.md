@@ -868,7 +868,9 @@ record it the same way. The advice names the model, not a token setting: no
 setting yet reaches the limit these stages use (#633). **No part of an answer
 still cut is used** (#831), prose included: the report, a summary or a
 document answer fails with an error that names the limit and quotes the cut
-answer, and query expansion adds no query. Every cut answer is logged with its
+answer, and query expansion adds no query. A retry that fails (an outage, a
+timeout) fails as the cut answer before it, naming that failure: a retry is
+one request, never re-sent as transient. Every cut answer is logged with its
 text. Desktop so far; the apps follow (#831, #829). **A declined answer**
 (Anthropic's `refusal`) is `MODEL_REFUSED` (−15), never retried, and never
 kept as prose: what a model wrote before declining is not its answer. Python
