@@ -182,8 +182,9 @@ a git pin). Snapshot rows keep `run_status`/`run_deciding` set-once.
   `ollamaMaxNumCtx` less the prompt. **Still cut, or a retry failed, every
   caller fails** with the cut error quoting the text (desktop
   `TruncatedResponseError`; iOS `LLMError.cut`; Android
-  `LLMError.TruncatedResponseError`); a failed retry is named in our words,
-  never the provider's text. Each cut is logged with its text; the desktop
+  `LLMError.TruncatedResponseError`); the apps name a failed retry by status
+  or type only, never the provider's text, the desktop quotes it redacted.
+  Each cut is logged with its text; the desktop
   also writes a `cut_answers` row per try. Desktop: past 8192 Anthropic
   streams; never through `_chat_response` (benchmarks keep fixed limits). Apps:
   timeouts × ⌈limit/8192⌉ (iOS a session per timeout, Android an OkHttp
@@ -192,9 +193,13 @@ a git pin). Snapshot rows keep `run_status`/`run_deciding` set-once.
   scorer must never read a cut error as unreadable or transient (its checks
   match messages, and the quote can say "json"). Query conversion: an
   unreadable or cut answer takes the fallback (desktop #827; the apps search
-  the claim itself, Android's `ResponseParser.claimQuery` since #840); a
-  failed request or a refusal fails the run on the apps. Smart search runs none of a cut answer's queries
-  and marks itself tried (iOS `SmartSearchError.cutOff`, Android
+  the claim itself, Android's `ResponseParser.claimQuery` since #840, in each
+  provider's syntax: Android builds Europe PMC's itself, iOS quotes
+  `PubMedFilters.clinicalPublicationFilter`'s types so `QueryTranslator` maps
+  them); a failed request or a refusal fails the run on the apps. Open: a
+  failed retry reads as a final cut (#842), the reader is not told the claim
+  was searched (#843). Smart search runs none of a cut answer's queries and
+  marks itself tried (iOS `SmartSearchError.cutOff`, Android
   `SmartSearchOutcome.CutOff`). **OpenAI is sent `max_completion_tokens`** on
   both apps: gpt-5.x answers 400 to `max_tokens`. **A refusal**
   (`refusal`/`content_filter`) fails as `LLMError.refused`/`RefusedError`,

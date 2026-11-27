@@ -56,6 +56,7 @@ class CutAnswerRetryTest {
     private lateinit var ollamaApi: OllamaApi
     private lateinit var service: LLMService
     private val asked = mutableListOf<Int>()
+    private val tagged = mutableListOf<Int>()
     private val requests = mutableListOf<OpenAIChatRequest>()
     private val logged = mutableListOf<String>()
 
@@ -78,6 +79,7 @@ class CutAnswerRetryTest {
             val request = thirdArg<OpenAIChatRequest>()
             requests += request
             asked += request.maxTokens ?: request.maxCompletionTokens!!
+            tagged += arg<LLMOutputLimit>(3).maxTokens
             queue.removeFirst()
         }
     }
@@ -132,6 +134,7 @@ class CutAnswerRetryTest {
 
         assertEquals("whole", result.content)
         assertEquals(listOf(2048, 4096, 8192, 16384), asked)
+        assertEquals("each request's read timeout follows its own limit", asked, tagged)
         assertEquals("every request is paid for", 400, result.inputTokens)
         assertEquals(2048 + 4096 + 8192 + 9000, result.outputTokens)
     }
@@ -233,6 +236,22 @@ class CutAnswerRetryTest {
     }
 
     @Test
+    fun `a stated maximum not below the raised limit fails the retry, not asked again`() = runTest {
+        for (maximum in listOf(9000, 4096)) {
+            asked.clear()
+            openAIReplies(
+                answer("cut", "length", 2048),
+                refused(400, "max_tokens: 4096 > $maximum, which is the maximum allowed number of output tokens for m")
+            )
+
+            val error = cutError(ask(provider = LLMProvider.DEEPSEEK))
+
+            assertEquals("asking within $maximum changes nothing", listOf(2048, 4096), asked)
+            assertTrue(error.message, error.message.contains("failed (HTTP 400)"))
+        }
+    }
+
+    @Test
     fun `a 400 stating no maximum fails the retry`() = runTest {
         openAIReplies(answer("cut", "length", 2048), refused(400, "refused"))
 
@@ -290,6 +309,7 @@ class CutAnswerRetryTest {
         val queue = ArrayDeque(replies.toList())
         coEvery { ollamaApi.chat(any(), any(), any()) } answers {
             sent += secondArg<OllamaChatRequest>()
+            tagged += thirdArg<LLMOutputLimit>().maxTokens
             val (reason, tokens) = queue.removeFirst()
             Response.success(
                 OllamaChatResponse(
@@ -311,6 +331,7 @@ class CutAnswerRetryTest {
 
         assertEquals("stop", result.content)
         assertEquals(listOf(2048, 4096), sent.map { it.options.numPredict })
+        assertEquals("each request's read timeout follows its own limit", listOf(2048, 4096), tagged)
         assertEquals(OllamaContext.numCtx(listOf("s", "u"), 4096), sent[1].options.numCtx)
         assertEquals(5048, result.outputTokens)
     }
@@ -353,6 +374,7 @@ class CutAnswerRetryTest {
         val queue = ArrayDeque(listOf("max_tokens" to 2048, "end_turn" to 3000))
         coEvery { anthropicApi.createMessage(any(), any(), any(), any(), any()) } answers {
             limits += arg<AnthropicMessagesRequest>(3).maxTokens
+            tagged += arg<LLMOutputLimit>(4).maxTokens
             val (stop, tokens) = queue.removeFirst()
             Response.success(
                 AnthropicMessagesResponse(
@@ -368,6 +390,7 @@ class CutAnswerRetryTest {
 
         assertEquals("end_turn", result.content)
         assertEquals(listOf(2048, 4096), limits)
+        assertEquals("each request's read timeout follows its own limit", limits, tagged)
         assertEquals("both requests are paid for", 200, result.inputTokens)
         assertEquals(5048, result.outputTokens)
     }
@@ -663,6 +686,18 @@ class CutAnswerRetryTest {
         service.generateReport(p, "k", "m", "claim", listOf(LLMService.DocumentCitation("t", "passage")), onUsage = sink)
 
         assertEquals((1..5).map { 100 to it }, heard)
+    }
+
+    @Test
+    fun `an unreadable query answer is a parse failure, and one still cut stays a cut`() = runTest {
+        // the workflow searches the claim itself for exactly these two (#840)
+        openAIReplies(answer("not json", "stop", 10))
+        val unreadable = service.convertToStructuredQuery(LLMProvider.OPENAI, "k", "m", "claim")
+        assertTrue("got $unreadable", unreadable.exceptionOrNull() is LLMError.ParseError)
+
+        openAIReplies(*(0..3).map { answer("{\"concepts\": [", "length", Constants.LLM_QUERY_MAX_TOKENS shl it) }.toTypedArray())
+        val cut = service.convertToStructuredQuery(LLMProvider.OPENAI, "k", "m", "claim")
+        assertTrue("got $cut", cut.exceptionOrNull() is LLMError.TruncatedResponseError)
     }
 
     @Test

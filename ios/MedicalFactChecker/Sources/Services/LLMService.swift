@@ -56,7 +56,8 @@ actor LLMService {
     private var provider: LLMProvider?
     /// The session a test injected, used for every request as it is.
     private let injectedSession: URLSession?
-    /// Sessions built per timeout, by ``timeouts(provider:maxTokens:)``.
+    /// Sessions built per timeout by `session(for:)`, keyed by
+    /// ``timeouts(provider:maxTokens:)``.
     private var sessions: [Timeouts: URLSession] = [:]
 
     // MARK: - Usage Tracking
@@ -94,7 +95,7 @@ actor LLMService {
     /// answer arrives only when it is whole, so a request asking more than
     /// `WorkflowConstants.timeoutBaseTokens` waits that many times longer
     /// (#831): a cut answer asked again with 8× its limit would otherwise time
-    /// out unasked.
+    /// out before it is answered.
     ///
     /// - Parameters:
     ///   - provider: The configured provider.

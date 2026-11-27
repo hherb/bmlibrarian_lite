@@ -347,6 +347,13 @@ class FactCheckWorkflow @Inject constructor(
      */
     private var structuredQuery: StructuredQuery? = null
 
+    /**
+     * The claim searched in its own words when the query answer could not be
+     * used, so each provider is asked it in its own syntax
+     * ([ResponseParser.claimQuery]); null otherwise.
+     */
+    private var claimFallback: String? = null
+
     // ==================== Main Entry Points ====================
 
     /**
@@ -816,6 +823,7 @@ class FactCheckWorkflow @Inject constructor(
     private fun adoptSession(session: SessionEntity) {
         if (currentSession?.id != session.id) {
             structuredQuery = null
+            claimFallback = null
         }
         currentSession = session
     }
@@ -975,6 +983,7 @@ class FactCheckWorkflow @Inject constructor(
         currentConfig = null
         isResumedSession = false
         structuredQuery = null
+        claimFallback = null
         _currentSessionId.value = null
         clearSearchFailureState()
         beginRetractionRun()
@@ -1461,7 +1470,8 @@ class FactCheckWorkflow @Inject constructor(
             // No part of an unusable answer is searched (#831)
             Log.w(TAG, "The query answer could not be used (${error::class.simpleName}); searching the claim itself")
             structuredQuery = null
-            return ResponseParser.claimQuery(claim)
+            claimFallback = claim
+            return ResponseParser.claimQuery(claim, config.searchProvider, excludePreprints = !config.includePreprints)
         }
         if (error != null) throw error
 
@@ -1471,6 +1481,7 @@ class FactCheckWorkflow @Inject constructor(
         // Apply user's preprint preference before building query
         parsed = parsed.copy(excludePreprints = !config.includePreprints)
         structuredQuery = parsed
+        claimFallback = null
 
         // Build provider-specific query string
         return QueryBuilderFactory.build(parsed, config.searchProvider)
@@ -1506,6 +1517,8 @@ class FactCheckWorkflow @Inject constructor(
                 // Apply preprint preference and build provider-specific query
                 val withPreprints = sq.copy(excludePreprints = !config.includePreprints)
                 QueryBuilderFactory.build(withPreprints, provider)
+            } ?: claimFallback?.let { claim ->
+                ResponseParser.claimQuery(claim, provider, excludePreprints = !config.includePreprints)
             } ?: session.pubmedQuery ?: ""
         }
 

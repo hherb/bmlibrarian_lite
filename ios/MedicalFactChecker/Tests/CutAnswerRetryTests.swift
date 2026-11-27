@@ -192,6 +192,14 @@ struct CutAnswerRetryTests {
         #expect(error?.after == "; asking again with 4096 tokens failed (HTTP 400)")
     }
 
+    @Test func aStatedMaximumEqualToTheRaisedLimitIsAFailedRetry() async throws {
+        let refusal = "max_tokens: 4096 > 4096, which is the maximum allowed number of output tokens for m"
+        let llm = service([cut("cut", 2048), .init(status: 400, message: refusal)])
+        let error = await cutError { _ = try await ask(llm) }
+        #expect(CutStubProtocol.maxTokens == [2048, 4096], "asking within 4096 is asking the same again")
+        #expect(error?.after == "; asking again with 4096 tokens failed (HTTP 400)")
+    }
+
     @Test func theRetryAsksWhatTheAnswerWasAskedWithOnlyTheLimitRaised() async throws {
         let llm = service([cut("cut", 2048), .init(content: "whole", outputTokens: 3000)])
         _ = try await llm.chat(

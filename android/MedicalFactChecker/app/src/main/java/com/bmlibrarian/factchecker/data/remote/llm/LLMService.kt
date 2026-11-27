@@ -63,8 +63,9 @@ class LLMService @Inject constructor(
      * @param userPrompt User message content
      * @param maxTokens Maximum tokens to generate
      * @param temperature Sampling temperature (0.0-2.0), for OpenAI-format providers and Ollama's `options`; never sent to Claude (#758)
-     * @param retryingCut False keeps the limit fixed and returns the answer as it
-     *   came, cut or not (the connection test's ten tokens)
+     * @param retryingCut False keeps the limit fixed and returns a cut answer
+     *   that has text as written; a textless cut still fails (the connection
+     *   test's ten tokens)
      * @param onUsage Told each answered request's token counts as the reply states
      *   them (#818), every retry's too, and an answer that then fails (unparsed,
      *   cut, empty or refused) as well: its tokens were spent

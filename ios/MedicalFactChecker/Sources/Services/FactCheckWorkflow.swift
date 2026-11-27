@@ -2554,7 +2554,8 @@ final class FactCheckWorkflow {
 
     // MARK: - Step Implementations
 
-    private func convertClaimToQuery() async throws {
+    /// Internal so a test can drive it.
+    func convertClaimToQuery() async throws {
         guard let session = session, let llmService = llmService else { return }
 
         try checkBudget()

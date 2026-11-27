@@ -349,10 +349,11 @@ wordings probed on 2026-11-26:
 | OpenAI | `This model supports at most M completion tokens` |
 | DeepSeek | `the valid range of max_tokens is [1, M]` |
 
-Mistral and Groq were not probed. Ollama never refuses a limit, so its
-ceiling is the largest `num_ctx` the apps send, less the prompt. A request's
-timeouts are multiplied by its limit over 8192, rounded up, since a
-non-streamed answer arrives only when it is whole. OpenAI is sent
+Mistral and Groq were not probed. Ollama's refusals state no maximum, so
+its ceiling is the largest `num_ctx` the apps send, less the prompt. A
+request's timeouts (Android: its read timeout) are multiplied by its limit
+over 8192, rounded up, since a non-streamed answer arrives only when it is
+whole. OpenAI is sent
 `max_completion_tokens`: its GPT-5 models answer 400 to `max_tokens`. The
 connection test asks ten tokens with `retryingCut` off.
 

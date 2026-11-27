@@ -716,6 +716,29 @@ class FactCheckWorkflowSearchFailureTest {
     }
 
     @Test
+    fun `the claim searched in its own words is asked in Europe PMC's own syntax`() = runTest {
+        holdSession(SearchProvider.BOTH)
+        val other = stored.copy(id = OTHER_SESSION_ID, workflowStep = WorkflowStep.CONVERTING_QUERY, pubmedQuery = null)
+        coEvery { sessionRepository.getSession(OTHER_SESSION_ID) } returns other
+        coEvery { documentRepository.getDocumentCount(any()) } returns 0
+        pubMedFailsWith(429)
+        val asked = mutableListOf<String>()
+        coEvery { europePMCApi.search(capture(asked), any(), any(), any(), any()) } returns
+            Response.error(503, "".toResponseBody(null))
+        coEvery { llmService.convertToStructuredQuery(any(), any(), any(), any(), any()) } returns
+            Result.failure(LLMError.ParseError("unparsed", "{\"concepts\":"))
+
+        workflow.resumeSession(OTHER_SESSION_ID, config(SearchProvider.BOTH))
+
+        // The PubMed form finds nothing there: Europe PMC reads neither hasabstract nor [pt]
+        assertTrue("Europe PMC was not asked", asked.isNotEmpty())
+        for (query in asked) {
+            assertTrue(query, query.contains("${other.claimText} AND HAS_ABSTRACT:y AND NOT SRC:PPR"))
+            assertFalse(query, query.contains("[pt]") || query.contains("hasabstract"))
+        }
+    }
+
+    @Test
     fun `a session whose record of shortfalls is damaged is not resumed, and the user is told why`() = runTest {
         holdSession(SearchProvider.PUBMED)
         stored = stored.copy(retrievalShortfallsJson = "null")

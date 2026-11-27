@@ -1256,10 +1256,14 @@ public enum PubMedFilters {
     ///
     /// Includes: Randomized Controlled Trials, Meta-Analyses, Systematic Reviews,
     /// Clinical Trials, Reviews, Guidelines, and Practice Guidelines.
+    ///
+    /// The types are quoted: `QueryTranslator` maps only quoted types to
+    /// Europe PMC's, and tags only the last word of an unquoted one, so a
+    /// stored query asked of Europe PMC found next to nothing.
     public static let clinicalPublicationFilter = """
-        AND (Randomized Controlled Trial[pt] OR Meta-Analysis[pt] OR \
-        Systematic Review[pt] OR Clinical Trial[pt] OR Review[pt] OR \
-        Guideline[pt] OR Practice Guideline[pt])
+        AND ("Randomized Controlled Trial"[pt] OR "Meta-Analysis"[pt] OR \
+        "Systematic Review"[pt] OR "Clinical Trial"[pt] OR "Review"[pt] OR \
+        "Guideline"[pt] OR "Practice Guideline"[pt])
         """
 
     /// Filter for human studies only.
