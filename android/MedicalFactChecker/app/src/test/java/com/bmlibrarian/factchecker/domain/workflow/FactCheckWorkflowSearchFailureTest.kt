@@ -51,6 +51,7 @@ import com.bmlibrarian.factchecker.domain.model.ShortfallQuery
 import com.bmlibrarian.factchecker.domain.model.StructuredQuery
 import com.bmlibrarian.factchecker.domain.model.WorkflowStep
 import com.bmlibrarian.factchecker.util.Constants
+import com.bmlibrarian.factchecker.util.ResponseParser
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.coVerifyOrder
@@ -509,6 +510,31 @@ class FactCheckWorkflowSearchFailureTest {
     }
 
     @Test
+    fun `a cut alternative-query answer marks smart search as tried and says it was cut off (#831)`() = runTest {
+        holdSession(SearchProvider.PUBMED)
+        coEvery { documentRepository.getDocumentCount(SESSION_ID) } returns 0
+        pubMedFailsWith(429)
+        pubMedFinds("1") { it == "aspirin" }
+        coEvery { llmService.generateAlternativeQueries(any(), any(), any(), any(), any(), any(), any(), any(), any()) } returns
+            Result.failure(LLMError.TruncatedResponseError("cut", 32768, 32768, "[{\"concepts\": ["))
+
+        workflow.resumeSession(SESSION_ID, smartSearchConfig())
+
+        // Asked once here: chat already asked it again with larger limits
+        coVerify(exactly = 1) {
+            llmService.generateAlternativeQueries(any(), any(), any(), any(), any(), any(), any(), any(), any())
+        }
+        coVerify { sessionRepository.updateSmartSearchState(SESSION_ID, true, null, null) }
+        assertEquals(
+            "The model's answer was cut off at its length limit, so no alternative search was run. " +
+                "A model that writes out its reasoning first can use up that limit; another model, " +
+                "chosen in Settings, may help.",
+            workflow.searchFailureMessage.value
+        )
+        assertTrue("got ${workflow.state.value}", workflow.state.value is WorkflowState.Completed)
+    }
+
+    @Test
     fun `more evidence whose alternative-query answers never hold a usable query keeps the report and says why`() = runTest {
         holdSession(SearchProvider.PUBMED)
         stored = stored.copy(workflowStep = WorkflowStep.COMPLETED)
@@ -664,6 +690,52 @@ class FactCheckWorkflowSearchFailureTest {
         workflow.resumeSession(SESSION_ID, config(SearchProvider.PUBMED))
 
         coVerify { pubMedApi.search(any(), term = "aspirin", any(), any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `an unreadable or cut query answer searches the claim itself, as iOS does (#840)`() = runTest {
+        holdSession(SearchProvider.PUBMED)
+        val other = stored.copy(id = OTHER_SESSION_ID, workflowStep = WorkflowStep.CONVERTING_QUERY, pubmedQuery = null)
+        coEvery { sessionRepository.getSession(OTHER_SESSION_ID) } returns other
+        coEvery { documentRepository.getDocumentCount(any()) } returns 0
+        pubMedFailsWith(429)
+        for (unusable in listOf(
+            LLMError.ParseError("unparsed", "{\"concepts\":"),
+            LLMError.TruncatedResponseError("cut", 2048, 2048, "{\"concepts\":")
+        )) {
+            coEvery { llmService.convertToStructuredQuery(any(), any(), any(), any(), any()) } returns Result.failure(unusable)
+            workflow.resumeSession(OTHER_SESSION_ID, config(SearchProvider.PUBMED))
+        }
+        coVerify(exactly = 2) { sessionRepository.updateQuery(OTHER_SESSION_ID, ResponseParser.claimQuery(other.claimText)) }
+
+        // control: a request that failed still fails the step, and stores no query
+        coEvery { llmService.convertToStructuredQuery(any(), any(), any(), any(), any()) } returns
+            Result.failure(LLMError.NetworkError("unreachable"))
+        workflow.resumeSession(OTHER_SESSION_ID, config(SearchProvider.PUBMED))
+        coVerify(exactly = 2) { sessionRepository.updateQuery(OTHER_SESSION_ID, any()) }
+    }
+
+    @Test
+    fun `the claim searched in its own words is asked in Europe PMC's own syntax`() = runTest {
+        holdSession(SearchProvider.BOTH)
+        val other = stored.copy(id = OTHER_SESSION_ID, workflowStep = WorkflowStep.CONVERTING_QUERY, pubmedQuery = null)
+        coEvery { sessionRepository.getSession(OTHER_SESSION_ID) } returns other
+        coEvery { documentRepository.getDocumentCount(any()) } returns 0
+        pubMedFailsWith(429)
+        val asked = mutableListOf<String>()
+        coEvery { europePMCApi.search(capture(asked), any(), any(), any(), any()) } returns
+            Response.error(503, "".toResponseBody(null))
+        coEvery { llmService.convertToStructuredQuery(any(), any(), any(), any(), any()) } returns
+            Result.failure(LLMError.ParseError("unparsed", "{\"concepts\":"))
+
+        workflow.resumeSession(OTHER_SESSION_ID, config(SearchProvider.BOTH))
+
+        // The PubMed form finds nothing there: Europe PMC reads neither hasabstract nor [pt]
+        assertTrue("Europe PMC was not asked", asked.isNotEmpty())
+        for (query in asked) {
+            assertTrue(query, query.contains("${other.claimText} AND HAS_ABSTRACT:y AND NOT SRC:PPR"))
+            assertFalse(query, query.contains("[pt]") || query.contains("hasabstract"))
+        }
     }
 
     @Test

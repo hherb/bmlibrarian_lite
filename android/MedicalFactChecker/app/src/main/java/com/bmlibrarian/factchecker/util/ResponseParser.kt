@@ -18,6 +18,8 @@
 
 package com.bmlibrarian.factchecker.util
 
+import com.bmlibrarian.factchecker.domain.model.QueryConstants
+import com.bmlibrarian.factchecker.domain.model.SearchProvider
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -402,8 +404,38 @@ object ResponseParser {
             return firstLine
         }
 
-        // Final fallback: use claim with basic filters
-        return "$claim AND hasabstract AND (Clinical Trial[pt] OR Randomized Controlled Trial[pt] OR Meta-Analysis[pt] OR Systematic Review[pt] OR Review[pt])"
+        return claimQuery(claim)
+    }
+
+    /**
+     * The query that searches the claim itself, with basic filters: what a
+     * conversion falls back to when the model's answer cannot be used (#840,
+     * the counterpart of iOS's `buildQueryFromJSON` final fallback).
+     *
+     * @param claim The claim
+     * @return A PubMed query for the claim's own words
+     */
+    fun claimQuery(claim: String): String =
+        "$claim AND hasabstract AND (Clinical Trial[pt] OR Randomized Controlled Trial[pt] OR Meta-Analysis[pt] OR Systematic Review[pt] OR Review[pt])"
+
+    /**
+     * The claim query in [provider]'s own syntax. Europe PMC reads neither
+     * `hasabstract` nor `[pt]`, so the PubMed query finds nothing there: it gets
+     * its own abstract filter and the preprint setting, as
+     * [com.bmlibrarian.factchecker.domain.model.EuropePMCQueryBuilder] gives a structured query.
+     *
+     * @param claim The claim
+     * @param provider The provider searched; [SearchProvider.BOTH] reads PubMed syntax
+     * @param excludePreprints Whether Europe PMC leaves preprints out
+     * @return A query for the claim's own words
+     */
+    fun claimQuery(claim: String, provider: SearchProvider, excludePreprints: Boolean): String {
+        if (provider != SearchProvider.EUROPE_PMC) return claimQuery(claim)
+        var query = claim + QueryConstants.AND_OPERATOR + QueryConstants.EUROPE_PMC_HAS_ABSTRACT_FILTER
+        if (excludePreprints) {
+            query += QueryConstants.AND_OPERATOR + QueryConstants.EUROPE_PMC_EXCLUDE_PREPRINTS_FILTER
+        }
+        return query
     }
 
     /**

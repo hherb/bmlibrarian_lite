@@ -32,6 +32,7 @@ import com.bmlibrarian.factchecker.data.remote.llm.LLMService
 import com.bmlibrarian.factchecker.data.remote.llm.ModelFetchService
 import com.bmlibrarian.factchecker.data.remote.llm.OllamaApi
 import com.bmlibrarian.factchecker.data.remote.llm.OpenAIApi
+import com.bmlibrarian.factchecker.data.remote.llm.llmReadTimeoutInterceptor
 import com.bmlibrarian.factchecker.BuildConfig
 import com.bmlibrarian.factchecker.data.remote.debugHttpLoggingInterceptor
 import com.bmlibrarian.factchecker.data.remote.pubmed.PubMedApi
@@ -76,7 +77,8 @@ object NetworkModule {
      *   OpenAlex's `mailto=` (OpenAlex's client is derived from this one and
      *   keeps its interceptors). No credential may travel in a URL (#243)
      * - Connection timeout: 30 seconds
-     * - Read timeout: 120 seconds (allows for slow LLM responses)
+     * - Read timeout: 120 seconds (allows for slow LLM responses), multiplied
+     *   for an LLM request by its output limit ([llmReadTimeoutInterceptor], #831)
      * - Write timeout: 60 seconds
      * - Automatic retry on connection failure
      *
@@ -90,6 +92,8 @@ object NetworkModule {
             .readTimeout(LLM_READ_TIMEOUT_SECONDS, TimeUnit.SECONDS)
             .writeTimeout(Constants.NETWORK_WRITE_TIMEOUT_SECONDS, TimeUnit.SECONDS)
             .retryOnConnectionFailure(true)
+            // An LLM request's read timeout grows with its output limit (#831)
+            .addInterceptor(llmReadTimeoutInterceptor(LLM_READ_TIMEOUT_SECONDS))
 
         // Only add logging interceptor in debug builds, at BASIC level: bodies
         // and headers carry credentials (see debugHttpLoggingInterceptor).

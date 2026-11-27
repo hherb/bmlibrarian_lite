@@ -16,6 +16,7 @@
 
 import Testing
 import Foundation
+import BioMedLit
 @testable import MedicalFactChecker
 
 // MARK: - PubMed to Europe PMC: MeSH Terms
@@ -396,5 +397,26 @@ struct QueryValidatorPubMedTests {
         let result = QueryValidator.validateEuropePMCQuery(query)
         #expect(!result.isValid)
         #expect(result.warnings.count >= 2)
+    }
+}
+
+// MARK: - The claim fallback asked of Europe PMC
+
+struct ClaimFallbackTranslationTests {
+    /// The query a cut or unreadable query answer searches (#840) is stored in
+    /// PubMed syntax and translated for Europe PMC: every type must arrive as
+    /// a PUB_TYPE, or Europe PMC finds next to nothing (56 hits, not 7,916).
+    @Test func everyPublicationTypeOfTheClaimFallbackReachesEuropePMC() {
+        let stored = "aspirin prevents strokes AND hasabstract \(PubMedFilters.clinicalPublicationFilter)"
+        let translated = QueryTranslator.pubmedToEuropePMC(stored)
+        #expect(!translated.contains("[pt]"), "\(translated)")
+        #expect(!translated.contains("hasabstract"), "\(translated)")
+        for type in [
+            #"PUB_TYPE:"randomized-controlled-trial""#, #"PUB_TYPE:"meta-analysis""#,
+            #"PUB_TYPE:"systematic-review""#, #"PUB_TYPE:"clinical-trial""#, #"PUB_TYPE:"review""#,
+            #"PUB_TYPE:"Guideline""#, #"PUB_TYPE:"Practice Guideline""#,
+        ] {
+            #expect(translated.contains(type), "\(translated)")
+        }
     }
 }

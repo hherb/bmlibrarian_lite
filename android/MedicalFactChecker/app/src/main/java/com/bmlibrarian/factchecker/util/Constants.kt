@@ -519,13 +519,24 @@ object Constants {
     const val LLM_HYDE_MAX_TOKENS = 4096
 
     /**
-     * What a cut answer's limit is multiplied by when it is asked once more (#822,
+     * What a cut answer's limit is multiplied by each time it is asked again (#822,
      * the desktop's #825): how long a model thinks varies from run to run.
      */
     const val LLM_CUT_ANSWER_RETRY_FACTOR = 2
 
-    /** The most output tokens a cut answer is asked again with, as on the desktop and iOS. */
-    const val LLM_CUT_ANSWER_RETRY_MAX_TOKENS = 16384
+    /**
+     * How many times a cut answer is asked again, each time with twice the last
+     * limit (#831, the desktop's `CUT_ANSWER_MAX_RETRIES`); no fixed cap: the
+     * model's own capacity bounds the limit.
+     */
+    const val LLM_CUT_ANSWER_MAX_RETRIES = 3
+
+    /**
+     * The output limit the base LLM read timeout is sized for (the report's limit,
+     * the largest first request): a request asking more waits that many times
+     * longer, rounded up (#831).
+     */
+    const val LLM_TIMEOUT_BASE_TOKENS = 8192
 
     /**
      * How many more times smart search asks the model for alternative queries

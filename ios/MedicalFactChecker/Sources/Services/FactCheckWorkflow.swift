@@ -2554,7 +2554,8 @@ final class FactCheckWorkflow {
 
     // MARK: - Step Implementations
 
-    private func convertClaimToQuery() async throws {
+    /// Internal so a test can drive it.
+    func convertClaimToQuery() async throws {
         guard let session = session, let llmService = llmService else { return }
 
         try checkBudget()
@@ -2563,15 +2564,23 @@ final class FactCheckWorkflow {
         let prompt = PromptTemplates.queryConversion(claim: session.claim)
 
         let messages = [LLMService.userMessage(prompt)]
-        let (response, usage) = try await llmService.chat(
-            messages: messages,
-            temperature: 0.1,
-            maxTokens: WorkflowConstants.shortAnswerMaxTokens,
-            jsonMode: true
-        )
-
-        // Record usage
-        recordUsage(usage, operationType: "query_conversion")
+        let response: String
+        do {
+            let (answer, usage) = try await llmService.chat(
+                messages: messages,
+                temperature: 0.1,
+                maxTokens: WorkflowConstants.shortAnswerMaxTokens,
+                jsonMode: true
+            )
+            recordUsage(usage, operationType: "query_conversion")
+            response = answer
+        } catch let error as LLMError where error.isCut {
+            // No part of a cut answer is used (#831): the claim's own words are
+            // searched, as for an unreadable answer (the desktop's #827).
+            // Its tokens go unrecorded, as other failed replies' do (#834)
+            logger.warning("The query answer was cut off at its length limit; searching the claim itself")
+            response = ""
+        }
 
         // Parse the structured query from LLM response
         if var parsed = StructuredQuery.parse(from: response) {
@@ -3809,6 +3818,10 @@ final class FactCheckWorkflow {
                 // Answered, not failed: asked again the model would decline again.
                 // Its tokens go unrecorded, as other failed replies' do (#834)
                 throw SmartSearchError.refused
+            } catch let error as LLMError where error.isCut {
+                // Still cut after its retries: none of its queries is searched,
+                // not even the complete ones, and it is not asked again (#831)
+                throw SmartSearchError.cutOff
             } catch {
                 // A request that failed asks nothing and pays nothing
                 // The type only: provider text can carry a credential, as on the desktop (#330)
@@ -3858,12 +3871,12 @@ final class FactCheckWorkflow {
         let alternatives: [StructuredQuery]
         do {
             alternatives = try await generateAlternativeQueries()
-        } catch SmartSearchError.refused {
+        } catch let error as SmartSearchError where error == .refused || error == .cutOff {
             // Marked as tried, as an unusable answer is: the workflow does not ask
             // and pay again on its own
             session.smartSearchEnabled = true
             try? modelContext.save()
-            throw SmartSearchError.refused
+            throw error
         }
 
         guard !alternatives.isEmpty else {
@@ -4391,6 +4404,12 @@ enum SmartSearchError: LocalizedError, Equatable {
     /// Smart search is marked as tried, as for ``noUsableQuery``.
     case refused
 
+    /// The model's answer was still cut off at its token limit after its
+    /// retries with larger limits (#831): none of its queries is searched.
+    ///
+    /// Smart search is marked as tried, as for ``noUsableQuery``.
+    case cutOff
+
     var errorDescription: String? {
         switch self {
         case .noUsableQuery:
@@ -4403,6 +4422,11 @@ enum SmartSearchError: LocalizedError, Equatable {
             // The desktop's ANSWER_REFUSED_TEXT, with the app's name for the setting
             return "The model declined to propose alternative search queries, "
                 + "so no alternative search was run. Another model, chosen in Settings, may answer."
+        case .cutOff:
+            // The desktop's ANSWER_CUT_OFF_TEXT, with the app's name for the setting
+            return "The model's answer was cut off at its length limit, so no alternative "
+                + "search was run. A model that writes out its reasoning first can use up "
+                + "that limit; another model, chosen in Settings, may help."
         }
     }
 }

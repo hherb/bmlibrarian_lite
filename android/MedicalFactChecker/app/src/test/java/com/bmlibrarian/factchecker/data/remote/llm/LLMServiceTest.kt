@@ -71,7 +71,7 @@ class LLMServiceTest {
         val provider = LLMProvider.OPENAI
         val expectedContent = "Test response from GPT"
         coEvery {
-            openAIApi.chatCompletion(any(), any(), any())
+            openAIApi.chatCompletion(any(), any(), any(), any())
         } returns Response.success(
             OpenAIChatResponse(
                 id = "chatcmpl-123",
@@ -114,7 +114,7 @@ class LLMServiceTest {
         val provider = LLMProvider.ANTHROPIC
         val expectedContent = "Test response from Claude"
         coEvery {
-            anthropicApi.createMessage(any(), any(), any(), any())
+            anthropicApi.createMessage(any(), any(), any(), any(), any())
         } returns Response.success(
             AnthropicMessagesResponse(
                 id = "msg-123",
@@ -152,7 +152,7 @@ class LLMServiceTest {
         // Arrange
         var callCount = 0
         coEvery {
-            openAIApi.chatCompletion(any(), any(), any())
+            openAIApi.chatCompletion(any(), any(), any(), any())
         } answers {
             callCount++
             if (callCount < 3) {
@@ -193,7 +193,7 @@ class LLMServiceTest {
         // Arrange
         var callCount = 0
         coEvery {
-            openAIApi.chatCompletion(any(), any(), any())
+            openAIApi.chatCompletion(any(), any(), any(), any())
         } answers {
             callCount++
             if (callCount < 2) {
@@ -238,7 +238,7 @@ class LLMServiceTest {
     fun `chat fails immediately on auth error without retry`() = runTest {
         // Arrange
         coEvery {
-            openAIApi.chatCompletion(any(), any(), any())
+            openAIApi.chatCompletion(any(), any(), any(), any())
         } returns Response.error(401, "Unauthorized".toResponseBody(null))
 
         // Act
@@ -254,14 +254,14 @@ class LLMServiceTest {
         assertTrue(result.isFailure)
         val error = result.exceptionOrNull()
         assertTrue(error is LLMError.AuthenticationError)
-        coVerify(exactly = 1) { openAIApi.chatCompletion(any(), any(), any()) }
+        coVerify(exactly = 1) { openAIApi.chatCompletion(any(), any(), any(), any()) }
     }
 
     @Test
     fun `chat fails immediately on invalid request error without retry`() = runTest {
         // Arrange
         coEvery {
-            openAIApi.chatCompletion(any(), any(), any())
+            openAIApi.chatCompletion(any(), any(), any(), any())
         } returns Response.error(400, "Bad request".toResponseBody(null))
 
         // Act
@@ -277,14 +277,14 @@ class LLMServiceTest {
         assertTrue(result.isFailure)
         val error = result.exceptionOrNull()
         assertTrue(error is LLMError.InvalidRequestError)
-        coVerify(exactly = 1) { openAIApi.chatCompletion(any(), any(), any()) }
+        coVerify(exactly = 1) { openAIApi.chatCompletion(any(), any(), any(), any()) }
     }
 
     @Test
     fun `chat returns EmptyResponseError when response has no choices`() = runTest {
         // Arrange
         coEvery {
-            openAIApi.chatCompletion(any(), any(), any())
+            openAIApi.chatCompletion(any(), any(), any(), any())
         } returns Response.success(
             OpenAIChatResponse(
                 id = "test-id",
@@ -312,7 +312,7 @@ class LLMServiceTest {
     fun `chat returns EmptyResponseError when message content is null`() = runTest {
         // Arrange
         coEvery {
-            openAIApi.chatCompletion(any(), any(), any())
+            openAIApi.chatCompletion(any(), any(), any(), any())
         } returns Response.success(
             OpenAIChatResponse(
                 id = "test-id",
@@ -349,7 +349,7 @@ class LLMServiceTest {
         // Arrange
         val jsonResponse = """{"score": 4, "rationale": "Highly relevant to the claim"}"""
         coEvery {
-            openAIApi.chatCompletion(any(), any(), any())
+            openAIApi.chatCompletion(any(), any(), any(), any())
         } returns Response.success(
             OpenAIChatResponse(
                 id = "test-id",
@@ -388,7 +388,7 @@ class LLMServiceTest {
 {"score": 5, "rationale": "Directly addresses the claim"}
 ```"""
         coEvery {
-            openAIApi.chatCompletion(any(), any(), any())
+            openAIApi.chatCompletion(any(), any(), any(), any())
         } returns Response.success(
             OpenAIChatResponse(
                 id = "test-id",
@@ -423,7 +423,7 @@ class LLMServiceTest {
         // Arrange
         val jsonResponse = """{"score": 2, "rationale": "No abstract available"}"""
         coEvery {
-            openAIApi.chatCompletion(any(), any(), any())
+            openAIApi.chatCompletion(any(), any(), any(), any())
         } returns Response.success(
             OpenAIChatResponse(
                 id = "test-id",
@@ -463,7 +463,7 @@ class LLMServiceTest {
             {"passage": "Additional evidence was presented", "relevance": "Provides context"}
         ]}"""
         coEvery {
-            openAIApi.chatCompletion(any(), any(), any())
+            openAIApi.chatCompletion(any(), any(), any(), any())
         } returns Response.success(
             OpenAIChatResponse(
                 id = "test-id",
@@ -501,7 +501,7 @@ class LLMServiceTest {
         // Unreadable, never "no passages": the document is recorded as failed (#761)
         val jsonResponse = """{"citations": [{"passage": "Aspirin reduced stroke.", "relevance": "x", "confidence": NaN}]}"""
         coEvery {
-            openAIApi.chatCompletion(any(), any(), any())
+            openAIApi.chatCompletion(any(), any(), any(), any())
         } returns Response.success(
             OpenAIChatResponse(
                 id = "test-id",
@@ -540,7 +540,7 @@ class LLMServiceTest {
             "report": "## Summary\\n\\nThe evidence supports the claim [1]."
         }"""
         coEvery {
-            openAIApi.chatCompletion(any(), any(), any())
+            openAIApi.chatCompletion(any(), any(), any(), any())
         } returns Response.success(
             OpenAIChatResponse(
                 id = "test-id",
@@ -584,7 +584,8 @@ class LLMServiceTest {
                 url = eq("https://api.anthropic.com/v1/messages"),
                 apiKey = any(),
                 anthropicVersion = any(),
-                request = any()
+                request = any(),
+                limit = any()
             )
         } returns Response.success(
             AnthropicMessagesResponse(
@@ -609,7 +610,8 @@ class LLMServiceTest {
                 url = "https://api.anthropic.com/v1/messages",
                 apiKey = "test-key",
                 anthropicVersion = "2023-06-01",
-                request = any()
+                request = any(),
+                limit = any()
             )
         }
     }
@@ -623,7 +625,7 @@ class LLMServiceTest {
     fun `Anthropic request carries no temperature`() = runTest {
         val sent = slot<AnthropicMessagesRequest>()
         coEvery {
-            anthropicApi.createMessage(any(), any(), any(), capture(sent))
+            anthropicApi.createMessage(any(), any(), any(), capture(sent), any())
         } returns Response.success(
             AnthropicMessagesResponse(
                 id = "msg-123",
@@ -653,7 +655,8 @@ class LLMServiceTest {
             openAIApi.chatCompletion(
                 url = eq("https://api.openai.com/v1/chat/completions"),
                 authorization = any(),
-                request = any()
+                request = any(),
+                limit = any()
             )
         } returns Response.success(
             OpenAIChatResponse(
@@ -683,7 +686,8 @@ class LLMServiceTest {
             openAIApi.chatCompletion(
                 url = "https://api.openai.com/v1/chat/completions",
                 authorization = "Bearer test-key",
-                request = any()
+                request = any(),
+                limit = any()
             )
         }
     }
@@ -692,7 +696,7 @@ class LLMServiceTest {
     fun `Ollama is asked on its native chat endpoint with a context that holds the request`() = runTest {
         // #760: the OpenAI-compatible /v1 takes no num_ctx, so a long prompt was cut silently
         val request = slot<OllamaChatRequest>()
-        coEvery { ollamaApi.chat(any(), capture(request)) } returns Response.success(
+        coEvery { ollamaApi.chat(any(), capture(request), any()) } returns Response.success(
             OllamaChatResponse(
                 model = "llama3.2",
                 message = OpenAIChatMessage("assistant", "Response"),
@@ -712,8 +716,8 @@ class LLMServiceTest {
             maxTokens = 4096
         ).getOrThrow()
 
-        coVerify { ollamaApi.chat(url = "http://localhost:11434/api/chat", request = any()) }
-        coVerify(exactly = 0) { openAIApi.chatCompletion(any(), any(), any()) }
+        coVerify { ollamaApi.chat(url = "http://localhost:11434/api/chat", request = any(), limit = any()) }
+        coVerify(exactly = 0) { openAIApi.chatCompletion(any(), any(), any(), any()) }
         assertEquals(16384, request.captured.options.numCtx)
         assertEquals(4096, request.captured.options.numPredict)
         assertFalse(request.captured.stream)
@@ -732,7 +736,7 @@ class LLMServiceTest {
     @Test
     fun `an Ollama prompt over its context is refused with Ollama's own reason, not retried`() = runTest {
         val reason = "request (3022 tokens) exceeds the available context size (1024 tokens), try increasing it"
-        coEvery { ollamaApi.chat(any(), any()) } returns
+        coEvery { ollamaApi.chat(any(), any(), any()) } returns
             Response.error(400, """{"error":"$reason"}""".toResponseBody(null))
 
         val error = service.chat(
@@ -746,14 +750,14 @@ class LLMServiceTest {
         assertTrue(error is LLMError.InvalidRequestError)
         val message = error?.message.orEmpty()
         assertTrue(message, message.contains(reason))
-        coVerify(exactly = 1) { ollamaApi.chat(any(), any()) }
+        coVerify(exactly = 1) { ollamaApi.chat(any(), any(), any()) }
     }
 
     // ==================== Alternative Query Tests ====================
 
     @Test
     fun `an alternative-query answer that holds no query is an unusable answer, not a failed request`() = runTest {
-        coEvery { openAIApi.chatCompletion(any(), any(), any()) } returns Response.success(
+        coEvery { openAIApi.chatCompletion(any(), any(), any(), any()) } returns Response.success(
             OpenAIChatResponse(
                 choices = listOf(OpenAIChatChoice(message = OpenAIChatMessage("assistant", "I cannot suggest any.")))
             )
@@ -768,16 +772,16 @@ class LLMServiceTest {
     fun `alternative queries are asked with their own limit`() = runTest {
         // #813: 22 of 40 answers outgrew the old 1024, and a cut answer is unreadable JSON
         val request = slot<OpenAIChatRequest>()
-        coEvery { openAIApi.chatCompletion(any(), any(), capture(request)) } returns Response.success(OpenAIChatResponse())
+        coEvery { openAIApi.chatCompletion(any(), any(), capture(request), any()) } returns Response.success(OpenAIChatResponse())
 
         generateAlternativeQueries()
 
-        assertEquals(Constants.LLM_ALTERNATIVE_QUERIES_MAX_TOKENS, request.captured.maxTokens)
+        assertEquals(Constants.LLM_ALTERNATIVE_QUERIES_MAX_TOKENS, request.captured.maxCompletionTokens)
     }
 
     @Test
     fun `an alternative-query answer with no content is an unusable answer`() = runTest {
-        coEvery { openAIApi.chatCompletion(any(), any(), any()) } returns Response.success(OpenAIChatResponse())
+        coEvery { openAIApi.chatCompletion(any(), any(), any(), any()) } returns Response.success(OpenAIChatResponse())
 
         val result = generateAlternativeQueries()
 
@@ -787,7 +791,7 @@ class LLMServiceTest {
     @Test
     fun `a refused alternative-query answer is a refusal, not an unusable answer (#819)`() = runTest {
         // An empty refusal must not read as an empty answer, which the workflow asks again
-        coEvery { openAIApi.chatCompletion(any(), any(), any()) } returns Response.success(
+        coEvery { openAIApi.chatCompletion(any(), any(), any(), any()) } returns Response.success(
             OpenAIChatResponse(
                 choices = listOf(
                     OpenAIChatChoice(message = OpenAIChatMessage("assistant", ""), finishReason = "content_filter")
@@ -798,12 +802,12 @@ class LLMServiceTest {
         val result = generateAlternativeQueries()
 
         assertTrue("got $result", result.exceptionOrNull() is LLMError.RefusedError)
-        coVerify(exactly = 1) { openAIApi.chatCompletion(any(), any(), any()) }
+        coVerify(exactly = 1) { openAIApi.chatCompletion(any(), any(), any(), any()) }
     }
 
     @Test
     fun `an alternative-query request that failed stays a failure`() = runTest {
-        coEvery { openAIApi.chatCompletion(any(), any(), any()) } returns Response.error(401, "".toResponseBody(null))
+        coEvery { openAIApi.chatCompletion(any(), any(), any(), any()) } returns Response.error(401, "".toResponseBody(null))
 
         val result = generateAlternativeQueries()
 

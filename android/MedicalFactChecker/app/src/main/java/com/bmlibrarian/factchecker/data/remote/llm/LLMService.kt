@@ -63,19 +63,22 @@ class LLMService @Inject constructor(
      * @param userPrompt User message content
      * @param maxTokens Maximum tokens to generate
      * @param temperature Sampling temperature (0.0-2.0), for OpenAI-format providers and Ollama's `options`; never sent to Claude (#758)
-     * @param retryingCut False keeps the limit fixed (the connection test's ten tokens)
+     * @param retryingCut False keeps the limit fixed and returns a cut answer
+     *   that has text as written; a textless cut still fails (the connection
+     *   test's ten tokens)
      * @param onUsage Told each answered request's token counts as the reply states
-     *   them (#818), a retry's too, and an answer that then fails (unparsed, cut
-     *   before it wrote anything, empty or refused) as well: its tokens were spent
+     *   them (#818), every retry's too, and an answer that then fails (unparsed,
+     *   cut, empty or refused) as well: its tokens were spent
      * @return Result containing LLMResult on success, or LLMError on failure. An
-     *   answer cut at its token limit is asked once more with the limit [raisedLimit]
-     *   allows (#822, the desktop's #825); the retry's answer is returned, cut or
-     *   not, with both requests' tokens. The retry is one attempt: one that fails
-     *   (a twice-as-long answer can pass the read timeout) is logged and the cut
-     *   answer returned. A cut answer is returned as written, and its caller reads
-     *   it as before (#829); one with no text (thinking took the limit) is asked
-     *   again the same way, and still textless it fails (#830). A reply that
-     *   declined to answer, the retry's too, fails with [LLMError.RefusedError] (#819).
+     *   answer cut at its token limit is asked again with the limit [raisedLimit]
+     *   allows, twice the last, up to [Constants.LLM_CUT_ANSWER_MAX_RETRIES] times
+     *   (#831, the desktop's `_chat_response_retrying_cut`); the first answer not
+     *   cut is returned, with every request's tokens. Each retry is one request. A
+     *   retry refused with a 400 stating the model's maximum ([statedOutputMaximum])
+     *   is asked again within it, not counted. An answer still cut, with or without
+     *   text, fails with [LLMError.TruncatedResponseError] quoting it: no part of a
+     *   cut answer is used; so does a retry that fails, its failure named. A reply
+     *   that declined to answer, a retry's too, fails with [LLMError.RefusedError] (#819).
      */
     suspend fun chat(
         provider: LLMProvider,
@@ -89,47 +92,63 @@ class LLMService @Inject constructor(
         onUsage: UsageSink = NO_USAGE
     ): Result<LLMResult> {
         val reply = chatRetryingFailures(provider, apiKey, model, systemPrompt, userPrompt, maxTokens, temperature, onUsage)
-        val answer = reply.getOrNull() ?: return reply
-        val raised = raisedLimit(answer.finishReason, answer.outputTokens, maxTokens)
-        if (!retryingCut || raised == null) {
-            if (isCut(answer.finishReason)) {
-                Log.w(TAG, "The answer from $model stopped at a length limit, not asked again (${answer.outputTokens} of $maxTokens tokens)")
+        var answer = reply.getOrElse { return reply }
+        if (!isCut(answer.finishReason)) return reply
+        if (!retryingCut) {
+            // As iOS: with no text there is nothing to return (#830)
+            return if (answer.content.isEmpty()) Result.failure(cutError(model, maxTokens, answer)) else reply
+        }
+        // Ollama's num_ctx is sized per request, up to its maximum; elsewhere the
+        // model's maximum is unknown until a provider refuses a limit past it
+        var room: Int? = if (provider.id == LLMProvider.OLLAMA.id) {
+            Constants.OLLAMA_MAX_NUM_CTX - answer.inputTokens - Constants.OLLAMA_TEMPLATE_TOKENS
+        } else {
+            null
+        }
+        var limit = maxTokens
+        var attempt = 0
+        var inputTokens = answer.inputTokens
+        var outputTokens = answer.outputTokens
+        var textLogged = false // a refused limit asks the same attempt again
+        while (true) {
+            val raised = raisedLimit(answer.outputTokens, limit, room, attempt)
+            Log.w(
+                TAG,
+                "The answer from $model reached its token limit ($limit; ${answer.outputTokens} tokens generated, " +
+                    "attempt $attempt); ${if (raised != null) "asking again with $raised" else "not asked again"}." +
+                    if (textLogged) "" else " $CUT_ANSWER_QUOTE_HEADING\n${answer.content}"
+            )
+            if (raised == null) return Result.failure(cutError(model, limit, answer))
+            val retried = chatRetryingFailures(
+                provider, apiKey, model, systemPrompt, userPrompt, raised, temperature, onUsage, retries = 0
+            )
+            val e = retried.exceptionOrNull()
+            if (e != null) {
+                currentCoroutineContext().ensureActive()
+                // A refusal is an answer, not a failed request: the desktop raises it too
+                if (e is LLMError.RefusedError) return retried
+                val maximum = (e as? LLMError.InvalidRequestError)?.details?.let { statedOutputMaximum(it) }
+                if (maximum != null && maximum < raised) {
+                    Log.w(TAG, "$model allows at most $maximum output tokens; asking within it")
+                    room = maximum // caps this retry and every later one
+                    textLogged = true
+                    continue
+                }
+                val failure = failureName(e)
+                Log.w(TAG, "Asking $model again with $raised failed ($failure)")
+                return Result.failure(cutError(model, limit, answer, "; asking again with $raised tokens failed ($failure)"))
             }
-            return written(reply, model)
+            val retry = retried.getOrThrow()
+            inputTokens += retry.inputTokens
+            outputTokens += retry.outputTokens
+            if (!isCut(retry.finishReason)) {
+                return Result.success(retry.copy(inputTokens = inputTokens, outputTokens = outputTokens))
+            }
+            answer = retry
+            limit = raised
+            attempt++
+            textLogged = false
         }
-        Log.w(TAG, "The answer from $model reached its token limit ($maxTokens); asking once more with $raised")
-        val retried = chatRetryingFailures(provider, apiKey, model, systemPrompt, userPrompt, raised, temperature, onUsage, retries = 0)
-        val retry = retried.getOrElse { e ->
-            currentCoroutineContext().ensureActive()
-            // A refusal is an answer, not a failed request: the desktop raises it too
-            if (e is LLMError.RefusedError) return retried
-            Log.w(TAG, "Asking $model once more with $raised failed (${e.message}); keeping the cut answer")
-            return written(reply, model)
-        }
-        if (isCut(retry.finishReason)) {
-            Log.w(TAG, "The answer from $model reached its token limit again (${retry.outputTokens} of $raised tokens)")
-        }
-        return written(retried, model).map {
-            it.copy(
-                inputTokens = answer.inputTokens + it.inputTokens,
-                outputTokens = answer.outputTokens + it.outputTokens
-            )
-        }
-    }
-
-    /**
-     * [reply], or a failure when it was cut before it wrote any text (#830): with
-     * nothing written there is no answer to keep, as the desktop's `_chat` raises
-     * `TruncatedResponseError`.
-     */
-    private fun written(reply: Result<LLMResult>, model: String): Result<LLMResult> {
-        val answer = reply.getOrNull() ?: return reply
-        if (answer.content.isNotEmpty() || !isCut(answer.finishReason)) return reply
-        return Result.failure(
-            LLMError.EmptyResponseError(
-                "The answer from $model reached its token limit (${answer.outputTokens} tokens) before it wrote anything"
-            )
-        )
     }
 
     /**
@@ -250,7 +269,7 @@ class LLMService @Inject constructor(
             onUsage = onUsage
         ).mapCatching { result ->
             StructuredQuery.parse(result.content)
-                ?: throw IllegalStateException("Failed to parse structured query from LLM response")
+                ?: throw LLMError.ParseError("Failed to parse structured query from LLM response", result.content)
         }
     }
 
@@ -275,8 +294,9 @@ class LLMService @Inject constructor(
      * @param onUsage Told each answered request's token counts (#818)
      * @return The alternative queries; an empty list when the model answered
      *   with no query that can be used, or with nothing, which asking again may
-     *   mend; or a failure when the request itself failed, or the model declined
-     *   to answer ([LLMError.RefusedError], #819)
+     *   mend; or a failure when the request itself failed, the model declined
+     *   to answer ([LLMError.RefusedError], #819) or its answer was still cut
+     *   at its limit ([LLMError.TruncatedResponseError], #831)
      */
     suspend fun generateAlternativeQueries(
         provider: LLMProvider,
@@ -570,12 +590,14 @@ class LLMService @Inject constructor(
                 OpenAIChatMessage(role = "system", content = systemPrompt),
                 OpenAIChatMessage(role = "user", content = userPrompt)
             ),
-            maxTokens = maxTokens,
+            // OpenAI's own models take only max_completion_tokens; the others max_tokens (#831)
+            maxTokens = maxTokens.takeUnless { provider.id == LLMProvider.OPENAI.id },
+            maxCompletionTokens = maxTokens.takeIf { provider.id == LLMProvider.OPENAI.id },
             temperature = temperature,
             thinking = thinkingConfigFor(provider)
         )
 
-        val response = openAIApi.chatCompletion(url, authorization, request)
+        val response = openAIApi.chatCompletion(url, authorization, request, LLMOutputLimit(maxTokens))
         return handleOpenAIResponse(response)
     }
 
@@ -611,7 +633,7 @@ class LLMService @Inject constructor(
             shift = false
         )
 
-        val response = ollamaApi.chat("${OllamaContext.nativeRoot(provider.baseUrl)}/api/chat", request)
+        val response = ollamaApi.chat("${OllamaContext.nativeRoot(provider.baseUrl)}/api/chat", request, LLMOutputLimit(maxTokens))
         if (response.isSuccessful) {
             val body = response.body() ?: throw LLMError.EmptyResponseError()
             return Result.success(LLMResult.fromOllama(body))
@@ -641,27 +663,98 @@ class LLMService @Inject constructor(
             finishReason == "refusal" || finishReason == "content_filter"
 
         /**
-         * The limit to ask a cut answer again with, or null not to ask again (#822),
-         * by the desktop's `cut_answers.raised_limit` rule. An answer that stopped
-         * short of its limit ran out of context window, which a larger limit does not
-         * change; a reply that states no token count cannot show it reached its limit.
-         * Without the desktop's `room` cap: Ollama's `num_ctx` is sized from each
-         * request's own limit ([OllamaContext.numCtx]).
+         * The limit to ask a cut answer again with, or null not to ask again (#822,
+         * #831), by the desktop's `cut_answers.raised_limit` rule. An answer that
+         * stopped short of its limit ran out of context window, which a larger limit
+         * does not change; a reply that states no token count cannot show it reached
+         * its limit.
          *
-         * @param finishReason Why the answer stopped
-         * @param outputTokens The tokens it generated, thinking included
+         * @param outputTokens The tokens the cut answer generated, thinking included
          * @param maxTokens The limit it was asked with
-         * @return Twice the limit, capped at [Constants.LLM_CUT_ANSWER_RETRY_MAX_TOKENS];
-         *   null when the answer was not cut at its limit or no larger limit is allowed
+         * @param room The most the model can produce here: what Ollama's largest
+         *   `num_ctx` leaves after the prompt, or the maximum a provider's refusal
+         *   stated; null when unknown
+         * @param attempt The cut answer's attempt, 0 for the first answer
+         * @return Twice the limit, capped by [room]; null when the answer stopped
+         *   short of its limit, the [Constants.LLM_CUT_ANSWER_MAX_RETRIES] retries
+         *   are spent or no larger limit is allowed
          */
-        internal fun raisedLimit(finishReason: String?, outputTokens: Int, maxTokens: Int): Int? {
-            if (!isCut(finishReason) || maxTokens <= 0 || outputTokens < maxTokens) return null
-            val raised = minOf(
-                maxTokens * Constants.LLM_CUT_ANSWER_RETRY_FACTOR,
-                Constants.LLM_CUT_ANSWER_RETRY_MAX_TOKENS
-            )
+        internal fun raisedLimit(outputTokens: Int, maxTokens: Int, room: Int?, attempt: Int = 0): Int? {
+            if (maxTokens <= 0 || outputTokens < maxTokens || attempt >= Constants.LLM_CUT_ANSWER_MAX_RETRIES) return null
+            val doubled = maxTokens * Constants.LLM_CUT_ANSWER_RETRY_FACTOR
+            val raised = room?.let { minOf(doubled, it) } ?: doubled
             return raised.takeIf { it > maxTokens }
         }
+
+        /** What precedes a cut answer's text, in its error and its log line (the desktop's `CUT_ANSWER_QUOTE_HEADING`). */
+        private const val CUT_ANSWER_QUOTE_HEADING = "The answer as cut:"
+
+        /**
+         * The error for an answer still cut at its token limit, quoting it (#831),
+         * byte-identical with the desktop's `_cut_error` and iOS.
+         *
+         * @param model The model that answered
+         * @param maxTokens The limit the answer reached, 0 when unknown
+         * @param answer The cut answer
+         * @param after What happened after it, such as a retry that failed
+         * @return The error, carrying the cut answer as its `content`
+         */
+        internal fun cutError(model: String, maxTokens: Int, answer: LLMResult, after: String = ""): LLMError.TruncatedResponseError {
+            val limit = if (maxTokens > 0) "$maxTokens tokens" else "${answer.outputTokens} tokens generated"
+            return LLMError.TruncatedResponseError(
+                message = "The answer from $model reached its token limit ($limit) and is incomplete$after. " +
+                    "$CUT_ANSWER_QUOTE_HEADING\n\n${answer.content}",
+                maxTokens = maxTokens,
+                outputTokens = answer.outputTokens,
+                content = answer.content
+            )
+        }
+
+        /**
+         * How a provider's 400 states the model's maximum output, probed 2026-11-26
+         * (#831): Anthropic (native and OpenAI-compatible), OpenAI, DeepSeek.
+         */
+        private val OUTPUT_MAXIMUM_PATTERNS = listOf(
+            Regex("""max_tokens: \d+ > (\d+), which is the maximum allowed number of output tokens"""),
+            Regex("""supports at most (\d+) completion tokens"""),
+            Regex("""valid range of max_tokens is \[1, (\d+)\]""")
+        )
+
+        /**
+         * The model's maximum output a refused request's message states (#831).
+         *
+         * @param message The 400's error body or message
+         * @return The maximum, or null when the message states none
+         */
+        internal fun statedOutputMaximum(message: String): Int? =
+            OUTPUT_MAXIMUM_PATTERNS.firstNotNullOfOrNull { it.find(message)?.groupValues?.get(1)?.toIntOrNull() }
+
+        /**
+         * A failed retry, named in our own words: its status code or its type,
+         * never a provider's body text, where a credential may hide (#831).
+         *
+         * @param error The retry's failure
+         * @return E.g. `HTTP 503` or `SocketTimeoutException`
+         */
+        internal fun failureName(error: Throwable): String = when (error) {
+            is LLMError.AuthenticationError -> "HTTP ${error.statusCode}"
+            is LLMError.InvalidRequestError -> "HTTP ${error.statusCode}"
+            is LLMError.ServerError -> "HTTP ${error.statusCode}"
+            is LLMError.RateLimitError -> "HTTP 429"
+            is LLMError.UnknownError -> error.statusCode?.let { "HTTP $it" } ?: "UnknownError"
+            is LLMError.NetworkError -> error.cause?.javaClass?.simpleName ?: "NetworkError"
+            else -> error.javaClass.simpleName
+        }
+
+        /**
+         * How many times the base read timeout a request with [maxTokens] gets
+         * (#831): one per [Constants.LLM_TIMEOUT_BASE_TOKENS], rounded up, at least one.
+         *
+         * @param maxTokens The request's output limit
+         * @return The multiplier
+         */
+        fun timeoutScale(maxTokens: Int): Int =
+            maxOf(1, (maxTokens + Constants.LLM_TIMEOUT_BASE_TOKENS - 1) / Constants.LLM_TIMEOUT_BASE_TOKENS)
 
         /**
          * What a retry after an unreadable reply adds to its request (#761),
@@ -814,7 +907,8 @@ class LLMService @Inject constructor(
             url = url,
             apiKey = apiKey,
             anthropicVersion = AnthropicApi.API_VERSION,
-            request = request
+            request = request,
+            limit = LLMOutputLimit(maxTokens)
         )
         return handleAnthropicResponse(response)
     }

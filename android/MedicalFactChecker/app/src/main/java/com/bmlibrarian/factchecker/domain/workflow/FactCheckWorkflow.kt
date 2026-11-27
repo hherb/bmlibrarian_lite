@@ -57,6 +57,7 @@ import com.bmlibrarian.factchecker.domain.model.Verdict
 import com.bmlibrarian.factchecker.domain.model.WorkflowStep
 import com.bmlibrarian.factchecker.ml.HydeGenerator
 import com.bmlibrarian.factchecker.util.Constants
+import com.bmlibrarian.factchecker.util.ResponseParser
 import com.bmlibrarian.factchecker.util.retraction.PaperRetractionCheck
 import com.bmlibrarian.factchecker.util.retraction.RetractionPaper
 import com.bmlibrarian.factchecker.util.retraction.RetractionReportSection
@@ -156,6 +157,12 @@ class FactCheckWorkflow @Inject constructor(
         private const val SMART_SEARCH_REFUSED_MESSAGE =
             "The model declined to propose alternative search queries, so no alternative search was run. " +
                 "Another model, chosen in Settings, may answer."
+
+        /** Shown when the model's answer for alternative queries was still cut at its limit (the desktop's wording, #831). */
+        private const val SMART_SEARCH_CUT_OFF_MESSAGE =
+            "The model's answer was cut off at its length limit, so no alternative search was run. " +
+                "A model that writes out its reasoning first can use up that limit; another model, " +
+                "chosen in Settings, may help."
 
         /** Shown when a request for more evidence ran alternative queries that found no new documents. */
         const val NO_NEW_EVIDENCE_NOTICE =
@@ -339,6 +346,13 @@ class FactCheckWorkflow @Inject constructor(
      * This mirrors the iOS approach for cross-platform consistency.
      */
     private var structuredQuery: StructuredQuery? = null
+
+    /**
+     * The claim searched in its own words when the query answer could not be
+     * used, so each provider is asked it in its own syntax
+     * ([ResponseParser.claimQuery]); null otherwise.
+     */
+    private var claimFallback: String? = null
 
     // ==================== Main Entry Points ====================
 
@@ -569,6 +583,10 @@ class FactCheckWorkflow @Inject constructor(
                     }
                     SmartSearchOutcome.Refused -> {
                         keepReportAfterFailedSearchForMore(session, SMART_SEARCH_REFUSED_MESSAGE)
+                        return
+                    }
+                    SmartSearchOutcome.CutOff -> {
+                        keepReportAfterFailedSearchForMore(session, SMART_SEARCH_CUT_OFF_MESSAGE)
                         return
                     }
                     is SmartSearchOutcome.Ran -> outcome
@@ -805,6 +823,7 @@ class FactCheckWorkflow @Inject constructor(
     private fun adoptSession(session: SessionEntity) {
         if (currentSession?.id != session.id) {
             structuredQuery = null
+            claimFallback = null
         }
         currentSession = session
     }
@@ -964,6 +983,7 @@ class FactCheckWorkflow @Inject constructor(
         currentConfig = null
         isResumedSession = false
         structuredQuery = null
+        claimFallback = null
         _currentSessionId.value = null
         clearSearchFailureState()
         beginRetractionRun()
@@ -1345,6 +1365,7 @@ class FactCheckWorkflow @Inject constructor(
                     SmartSearchOutcome.Unavailable -> _searchFailureMessage.value = SMART_SEARCH_UNAVAILABLE_MESSAGE
                     SmartSearchOutcome.Unusable -> _searchFailureMessage.value = SMART_SEARCH_UNUSABLE_MESSAGE
                     SmartSearchOutcome.Refused -> _searchFailureMessage.value = SMART_SEARCH_REFUSED_MESSAGE
+                    SmartSearchOutcome.CutOff -> _searchFailureMessage.value = SMART_SEARCH_CUT_OFF_MESSAGE
                     is SmartSearchOutcome.Ran -> recordShortfalls(session.id, smartSearch.unrecordedShortfalls)
                 }
                 // Re-check after smart search
@@ -1423,7 +1444,10 @@ class FactCheckWorkflow @Inject constructor(
      * Convert a medical claim to a PubMed query using the LLM.
      *
      * Stores the structured query for provider-specific translation, mirroring
-     * the iOS approach for cross-platform consistency.
+     * the iOS approach for cross-platform consistency. An answer that cannot be
+     * used, unreadable or still cut at its token limit, searches the claim
+     * itself ([ResponseParser.claimQuery]), as iOS does (#840); a request that
+     * failed or a refusal still fails the step.
      */
     private suspend fun convertClaimToQuery(claim: String, config: WorkflowConfig): String {
         val provider = getLLMProvider()
@@ -1441,10 +1465,15 @@ class FactCheckWorkflow @Inject constructor(
         // Before the failure check: an unreadable answer was paid for too
         recordUsage("query_conversion", tokens)
 
-        if (result.isFailure) {
-            throw result.exceptionOrNull()
-                ?: Exception("Failed to convert claim to query")
+        val error = result.exceptionOrNull()
+        if (error is LLMError.ParseError || error is LLMError.TruncatedResponseError) {
+            // No part of an unusable answer is searched (#831)
+            Log.w(TAG, "The query answer could not be used (${error::class.simpleName}); searching the claim itself")
+            structuredQuery = null
+            claimFallback = claim
+            return ResponseParser.claimQuery(claim, config.searchProvider, excludePreprints = !config.includePreprints)
         }
+        if (error != null) throw error
 
         // Store structured query for provider-specific translation
         var parsed = result.getOrThrow()
@@ -1452,6 +1481,7 @@ class FactCheckWorkflow @Inject constructor(
         // Apply user's preprint preference before building query
         parsed = parsed.copy(excludePreprints = !config.includePreprints)
         structuredQuery = parsed
+        claimFallback = null
 
         // Build provider-specific query string
         return QueryBuilderFactory.build(parsed, config.searchProvider)
@@ -1487,6 +1517,8 @@ class FactCheckWorkflow @Inject constructor(
                 // Apply preprint preference and build provider-specific query
                 val withPreprints = sq.copy(excludePreprints = !config.includePreprints)
                 QueryBuilderFactory.build(withPreprints, provider)
+            } ?: claimFallback?.let { claim ->
+                ResponseParser.claimQuery(claim, provider, excludePreprints = !config.includePreprints)
             } ?: session.pubmedQuery ?: ""
         }
 
@@ -2350,6 +2382,9 @@ class FactCheckWorkflow @Inject constructor(
         /** The model declined to propose alternative queries (#819); smart search is marked as tried. */
         data object Refused : SmartSearchOutcome
 
+        /** The model's answer was still cut at its limit after its retries (#831); none of it is searched, and smart search is marked as tried. */
+        data object CutOff : SmartSearchOutcome
+
         /**
          * The alternative queries ran.
          *
@@ -2404,6 +2439,12 @@ class FactCheckWorkflow @Inject constructor(
                 Log.w(TAG, "Smart search's alternative queries were refused")
                 markTried()
                 return SmartSearchOutcome.Refused
+            }
+            if (error is LLMError.TruncatedResponseError) {
+                // Answered and paid for, its retries with larger limits included
+                Log.w(TAG, "Smart search's alternative queries were cut off at their length limit")
+                markTried()
+                return SmartSearchOutcome.CutOff
             }
             // Not marked as tried, so smart search can be tried again
             Log.e(TAG, "Smart search could not ask for alternative queries (${error.javaClass.simpleName})")
@@ -2513,8 +2554,9 @@ class FactCheckWorkflow @Inject constructor(
      * @param triedQueries The alternative queries earlier rounds ran, each as its
      *   concept names joined by " AND "
      * @return The queries; an empty list when every answer, retries included, held
-     *   none; or a failure when the model could not be asked, or declined to answer
-     *   ([LLMError.RefusedError])
+     *   none; or a failure when the model could not be asked, declined to answer
+     *   ([LLMError.RefusedError]) or answered cut at its limit, its retries
+     *   included ([LLMError.TruncatedResponseError], not asked again here)
      */
     private suspend fun requestAlternativeQueries(
         session: SessionEntity,

@@ -101,6 +101,21 @@ class ParallelScoringServiceTest {
     }
 
     @Test
+    fun `a cut answer is neither unreadable nor transient, whatever its quote says (#831)`() {
+        val cut = LLMError.TruncatedResponseError(
+            "The answer from m reached its token limit (8192 tokens) and is incomplete; asking again with " +
+                "16384 tokens failed (SocketTimeoutException). The answer as cut:\n\n{\"json\": \"invalid score",
+            8192, 8192, "{\"json\": \"invalid score"
+        )
+
+        assertFalse(ParallelScoringService.isParseError(cut))
+        assertFalse(ParallelScoringService.isRetryableError(cut))
+        // Control: the same message on another error reads as both
+        assertTrue(ParallelScoringService.isParseError(IllegalStateException(cut.message)))
+        assertTrue(ParallelScoringService.isRetryableError(IllegalStateException(cut.message)))
+    }
+
+    @Test
     fun `the retries after an unreadable reply carry the correction note`() = runTest {
         val llm = spyk(LLMService(mockk(relaxed = true), mockk(relaxed = true), mockk(relaxed = true)))
         val prompts = mutableListOf<String>()
