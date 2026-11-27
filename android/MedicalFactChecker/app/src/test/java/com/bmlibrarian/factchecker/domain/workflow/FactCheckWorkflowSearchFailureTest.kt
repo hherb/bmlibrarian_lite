@@ -51,6 +51,7 @@ import com.bmlibrarian.factchecker.domain.model.ShortfallQuery
 import com.bmlibrarian.factchecker.domain.model.StructuredQuery
 import com.bmlibrarian.factchecker.domain.model.WorkflowStep
 import com.bmlibrarian.factchecker.util.Constants
+import com.bmlibrarian.factchecker.util.ResponseParser
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.coVerifyOrder
@@ -689,6 +690,29 @@ class FactCheckWorkflowSearchFailureTest {
         workflow.resumeSession(SESSION_ID, config(SearchProvider.PUBMED))
 
         coVerify { pubMedApi.search(any(), term = "aspirin", any(), any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `an unreadable or cut query answer searches the claim itself, as iOS does (#840)`() = runTest {
+        holdSession(SearchProvider.PUBMED)
+        val other = stored.copy(id = OTHER_SESSION_ID, workflowStep = WorkflowStep.CONVERTING_QUERY, pubmedQuery = null)
+        coEvery { sessionRepository.getSession(OTHER_SESSION_ID) } returns other
+        coEvery { documentRepository.getDocumentCount(any()) } returns 0
+        pubMedFailsWith(429)
+        for (unusable in listOf(
+            LLMError.ParseError("unparsed", "{\"concepts\":"),
+            LLMError.TruncatedResponseError("cut", 2048, 2048, "{\"concepts\":")
+        )) {
+            coEvery { llmService.convertToStructuredQuery(any(), any(), any(), any(), any()) } returns Result.failure(unusable)
+            workflow.resumeSession(OTHER_SESSION_ID, config(SearchProvider.PUBMED))
+        }
+        coVerify(exactly = 2) { sessionRepository.updateQuery(OTHER_SESSION_ID, ResponseParser.claimQuery(other.claimText)) }
+
+        // control: a request that failed still fails the step, and stores no query
+        coEvery { llmService.convertToStructuredQuery(any(), any(), any(), any(), any()) } returns
+            Result.failure(LLMError.NetworkError("unreachable"))
+        workflow.resumeSession(OTHER_SESSION_ID, config(SearchProvider.PUBMED))
+        coVerify(exactly = 2) { sessionRepository.updateQuery(OTHER_SESSION_ID, any()) }
     }
 
     @Test

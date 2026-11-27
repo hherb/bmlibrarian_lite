@@ -190,9 +190,10 @@ a git pin). Snapshot rows keep `run_status`/`run_deciding` set-once.
   interceptor reading a Retrofit `@Tag`); the connection test passes
   `retryingCut: false` (its text is returned, a textless cut fails). Android's
   scorer must never read a cut error as unreadable or transient (its checks
-  match messages, and the quote can say "json"). Query conversion: the
-  desktop and iOS take their fallback; **Android has none and fails the run
-  (#840, decision wanted)**. Smart search runs none of a cut answer's queries
+  match messages, and the quote can say "json"). Query conversion: an
+  unreadable or cut answer takes the fallback (desktop #827; the apps search
+  the claim itself, Android's `ResponseParser.claimQuery` since #840); a
+  failed request or a refusal fails the run on the apps. Smart search runs none of a cut answer's queries
   and marks itself tried (iOS `SmartSearchError.cutOff`, Android
   `SmartSearchOutcome.CutOff`). **OpenAI is sent `max_completion_tokens`** on
   both apps: gpt-5.x answers 400 to `max_tokens`. **A refusal**
@@ -286,8 +287,7 @@ Open issues by family; each issue carries the detail. None blocks another.
   contract fixture): **#815**.
 - **#823** a refused desktop quality assessment reads as unclassified
   (maintainer's call). **#834** the apps' unrecorded paid requests. **#835** a
-  flaky Android wall-clock test. **#840** Android's query conversion has no
-  fallback (maintainer's call).
+  flaky Android wall-clock test.
 - **From the bmlib syncs.** PR #757's issues are fixed and unreleased (a
   0.6.1 is the maintainer's call; PRs #765–#767, #771, #774, #775). Still
   deferred: #768, #769 (apps' Ollama), #770 (prompts ask for null), #773

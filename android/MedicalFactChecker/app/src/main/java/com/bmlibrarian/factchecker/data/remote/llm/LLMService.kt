@@ -268,7 +268,7 @@ class LLMService @Inject constructor(
             onUsage = onUsage
         ).mapCatching { result ->
             StructuredQuery.parse(result.content)
-                ?: throw IllegalStateException("Failed to parse structured query from LLM response")
+                ?: throw LLMError.ParseError("Failed to parse structured query from LLM response", result.content)
         }
     }
 

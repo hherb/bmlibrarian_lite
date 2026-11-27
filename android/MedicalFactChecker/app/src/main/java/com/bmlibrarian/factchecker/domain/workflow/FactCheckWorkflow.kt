@@ -57,6 +57,7 @@ import com.bmlibrarian.factchecker.domain.model.Verdict
 import com.bmlibrarian.factchecker.domain.model.WorkflowStep
 import com.bmlibrarian.factchecker.ml.HydeGenerator
 import com.bmlibrarian.factchecker.util.Constants
+import com.bmlibrarian.factchecker.util.ResponseParser
 import com.bmlibrarian.factchecker.util.retraction.PaperRetractionCheck
 import com.bmlibrarian.factchecker.util.retraction.RetractionPaper
 import com.bmlibrarian.factchecker.util.retraction.RetractionReportSection
@@ -1434,7 +1435,10 @@ class FactCheckWorkflow @Inject constructor(
      * Convert a medical claim to a PubMed query using the LLM.
      *
      * Stores the structured query for provider-specific translation, mirroring
-     * the iOS approach for cross-platform consistency.
+     * the iOS approach for cross-platform consistency. An answer that cannot be
+     * used, unreadable or still cut at its token limit, searches the claim
+     * itself ([ResponseParser.claimQuery]), as iOS does (#840); a request that
+     * failed or a refusal still fails the step.
      */
     private suspend fun convertClaimToQuery(claim: String, config: WorkflowConfig): String {
         val provider = getLLMProvider()
@@ -1452,10 +1456,14 @@ class FactCheckWorkflow @Inject constructor(
         // Before the failure check: an unreadable answer was paid for too
         recordUsage("query_conversion", tokens)
 
-        if (result.isFailure) {
-            throw result.exceptionOrNull()
-                ?: Exception("Failed to convert claim to query")
+        val error = result.exceptionOrNull()
+        if (error is LLMError.ParseError || error is LLMError.TruncatedResponseError) {
+            // No part of an unusable answer is searched (#831)
+            Log.w(TAG, "The query answer could not be used (${error::class.simpleName}); searching the claim itself")
+            structuredQuery = null
+            return ResponseParser.claimQuery(claim)
         }
+        if (error != null) throw error
 
         // Store structured query for provider-specific translation
         var parsed = result.getOrThrow()

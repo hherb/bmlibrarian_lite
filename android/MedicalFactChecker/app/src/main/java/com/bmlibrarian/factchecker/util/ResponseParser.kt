@@ -402,9 +402,19 @@ object ResponseParser {
             return firstLine
         }
 
-        // Final fallback: use claim with basic filters
-        return "$claim AND hasabstract AND (Clinical Trial[pt] OR Randomized Controlled Trial[pt] OR Meta-Analysis[pt] OR Systematic Review[pt] OR Review[pt])"
+        return claimQuery(claim)
     }
+
+    /**
+     * The query that searches the claim itself, with basic filters: what a
+     * conversion falls back to when the model's answer cannot be used (#840,
+     * iOS's `buildQueryFromJSON` final fallback).
+     *
+     * @param claim The claim
+     * @return A PubMed query for the claim's own words
+     */
+    fun claimQuery(claim: String): String =
+        "$claim AND hasabstract AND (Clinical Trial[pt] OR Randomized Controlled Trial[pt] OR Meta-Analysis[pt] OR Systematic Review[pt] OR Review[pt])"
 
     /**
      * Parse a PubMed query conversion response from LLM.

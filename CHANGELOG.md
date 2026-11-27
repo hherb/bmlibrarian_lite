@@ -130,8 +130,10 @@ apps additionally carry their own store version tags (`swift_*`, `appstore_*`).
   with an error that names the limit and quotes the cut answer. Before, a
   cut answer was read as complete: iOS citations came back empty and
   Android's report and citation parsers kept the readable part. Smart search
-  runs none of a cut answer's queries and says why. A cut query conversion
-  searches the claim itself. Each cut answer is logged with its text.
+  runs none of a cut answer's queries and says why. A query conversion
+  whose answer is cut or unreadable searches the claim itself. On Android,
+  before #840, an unreadable answer failed the whole run. Each cut answer is
+  logged with its text.
 - **Apps: OpenAI's GPT-5 models are asked with `max_completion_tokens`.**
   They answer 400 to `max_tokens`, so every request to the apps' default
   OpenAI model (`gpt-5.2`) failed.
